@@ -1,0 +1,5 @@
+# systemd user preset for Lemonade Server
+# Automatically enables socket-activated lemond for all users on install.
+# This allows lemonade-tray to trigger lemond on first connection without
+# any manual configuration step post-install.
+enable lemonade-server.socket

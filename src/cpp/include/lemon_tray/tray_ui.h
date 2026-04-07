@@ -83,6 +83,10 @@ private:
     void on_show_logs();
     void on_open_documentation();
     void on_quit();
+#if defined(__linux__) && !defined(__ANDROID__)
+    void on_enable_server();
+    void on_show_enable_instructions();
+#endif
 
     // App launch — uses lemonade:// protocol, falls back to web app
     void open_url(const std::string& url);

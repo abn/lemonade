@@ -96,11 +96,21 @@ bool TrayUI::initialize() {
     }
 
     tray_->set_ready_callback([this]() {
-        // Suppress the startup notification when the tray launches in disconnected
-        // state (port_==0); a reconnect doesn't warrant a "server is running" pop-up.
-        if (!silent_ && port_ > 0) {
+        if (silent_) return;
+#if defined(__linux__) && !defined(__ANDROID__)
+        // State A: socket absent — guide user to enable the service
+        if (!uds_path_.empty() && !fs::exists(uds_path_)) {
+            show_notification("Lemonade Server not enabled",
+                "Click the tray icon and select \"Enable Lemonade Server\" to get started.");
+            return;
+        }
+#endif
+        // Connected: show the standard startup notification
+        if (port_ > 0) {
             show_notification("Woohoo!", "Lemonade Server is running! Right-click the tray icon to access options.");
         }
+        // State B (socket present, not yet responding): no notification — background
+        // poll will reconnect silently and show the connected notification when ready.
     });
 
 #ifdef _WIN32
@@ -351,7 +361,23 @@ Menu TrayUI::create_menu(bool server_reachable,
     Menu menu;
 
     if (!server_reachable) {
+#if defined(__linux__) && !defined(__ANDROID__)
+        // State A: UDS path set but socket file absent — service not configured
+        bool socket_absent = !uds_path_.empty() && !fs::exists(uds_path_);
+        if (socket_absent) {
+            menu.add_item(MenuItem::Action("Service not enabled", nullptr, false));
+            if (std::getenv("FLATPAK_ID")) {
+                menu.add_item(MenuItem::Action("How to enable...", [this]() { on_show_enable_instructions(); }));
+            } else {
+                menu.add_item(MenuItem::Action("Enable Lemonade Server", [this]() { on_enable_server(); }));
+            }
+        } else {
+            // State B: socket present but server not responding — reconnect loop handles it
+            menu.add_item(MenuItem::Action("Server not running", nullptr, false));
+        }
+#else
         menu.add_item(MenuItem::Action("Server not running", nullptr, false));
+#endif
         menu.add_separator();
         menu.add_item(MenuItem::Action("Documentation", [this]() { on_open_documentation(); }));
         menu.add_separator();
@@ -592,6 +618,29 @@ void TrayUI::on_quit() {
     std::cout << "Quitting application..." << std::endl;
     stop();
 }
+
+// ---------------------------------------------------------------------------
+// Server enable actions (Linux only)
+// ---------------------------------------------------------------------------
+
+#if defined(__linux__) && !defined(__ANDROID__)
+void TrayUI::on_enable_server() {
+    // Fork a child to run: systemctl --user enable --now lemonade-server.socket
+    // Fire-and-forget: the background refresh loop (every 5 s) detects when lemond
+    // comes up via socket activation and transitions the tray to connected state.
+    pid_t pid = fork();
+    if (pid == 0) {
+        execlp("systemctl", "systemctl", "--user", "enable", "--now",
+               "lemonade-server.socket", nullptr);
+        _exit(127);
+    }
+}
+
+void TrayUI::on_show_enable_instructions() {
+    show_notification("Enable Lemonade Server",
+        "Run: systemctl --user enable --now lemonade-server.socket");
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // App launch helpers

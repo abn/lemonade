@@ -1414,6 +1414,10 @@ if(UNIX AND NOT APPLE)
         DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user
         RENAME lemonade-server.socket
     )
+    # Install systemd user preset — auto-enables socket activation for all users
+    install(FILES ${CMAKE_SOURCE_DIR}/data/50-lemonade-server.preset
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user-preset
+    )
     # Create symlink in standard systemd search path only if not installing to /usr
     # (if prefix is /usr, the service is already in the standard location)
     if(NOT CMAKE_INSTALL_PREFIX STREQUAL "/usr")
