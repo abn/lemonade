@@ -1,0 +1,15 @@
+[Unit]
+Description=Lemonade Server Command Socket
+Documentation=https://github.com/onnx/lemonade
+# The socket unit activates the service on first connection.
+# Enable this unit to allow tray apps and sandboxed clients to connect even
+# when lemond is not yet running: systemd will start lemond on demand.
+
+[Socket]
+ListenStream=/run/lemonade/lemond.sock
+SocketMode=0600
+RuntimeDirectory=lemonade
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=sockets.target

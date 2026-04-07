@@ -20,6 +20,7 @@
 #include <thread>
 #include <CLI/CLI.hpp>
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 
 #ifdef _WIN32
 // Windows embeds the server
@@ -85,6 +86,55 @@ static bool wait_for_server(const std::string& host, int port, int timeout_secon
     }
     return false;
 }
+
+// ---------------------------------------------------------------------------
+// Linux: Unix Domain Socket discovery helpers
+// ---------------------------------------------------------------------------
+
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <unistd.h>
+
+static std::string lemond_uds_path() {
+    const char* xdg = std::getenv("XDG_RUNTIME_DIR");
+    std::string base;
+    if (xdg && *xdg) {
+        base = xdg;
+    } else {
+        uid_t uid = getuid();
+        base = (uid == 0) ? "/run" : "/run/user/" + std::to_string(static_cast<unsigned>(uid));
+    }
+    return base + "/lemonade/lemond.sock";
+}
+
+static bool is_local_host(const std::string& host) {
+    return host.empty() || host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0";
+}
+
+// Connect to lemond via its Unix Domain Socket HTTP server.
+// On success, sets out_port to the TCP port lemond is listening on and returns true.
+static bool wait_for_uds_server(const std::string& socket_path, int timeout_s, int& out_port) {
+    for (int i = 0; i < timeout_s * 2; ++i) {
+        try {
+            httplib::Client cli(socket_path);
+            cli.set_address_family(AF_UNIX);
+            cli.set_connection_timeout(1);
+            cli.set_read_timeout(3);
+            auto res = cli.Get("/v1/health");
+            if (res && res->status == 200) {
+                try {
+                    auto health = nlohmann::json::parse(res->body);
+                    if (health.contains("port") && health["port"].is_number_integer()) {
+                        out_port = health["port"].get<int>();
+                    }
+                } catch (...) {}
+                return true;
+            }
+        } catch (...) {}
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+    return false;
+}
+#endif // __linux__
 
 // ---------------------------------------------------------------------------
 // Windows entry point (SUBSYSTEM:WINDOWS — embedded server)
@@ -279,13 +329,29 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, tray_signal_handler);
     signal(SIGTERM, tray_signal_handler);
 
-    // Wait for router to be reachable (retry with backoff up to 30s)
-    std::cout << "Connecting to lemond at " << host << ":" << port << "..." << std::endl;
-    if (!wait_for_server(host, port, 30)) {
-        std::cerr << "Error: Could not connect to lemond at " << host << ":" << port << std::endl;
-        std::cerr << "Make sure lemond is running." << std::endl;
-        return 1;
+    // On Linux with a local host, discover the server via the Unix Domain Socket.
+    // This works with systemd socket activation (the socket exists even before
+    // lemond starts) and lets the tray learn the actual TCP port dynamically.
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (is_local_host(host)) {
+        std::string uds_path = lemond_uds_path();
+        std::cout << "Waiting for lemond via UDS socket at " << uds_path << "..." << std::endl;
+        if (!wait_for_uds_server(uds_path, 30, port)) {
+            std::cerr << "Error: Could not connect to lemond via " << uds_path << std::endl;
+            std::cerr << "Make sure lemond is running (or lemonade-server.socket is enabled)." << std::endl;
+            return 1;
+        }
+    } else {
+#endif
+        std::cout << "Connecting to lemond at " << host << ":" << port << "..." << std::endl;
+        if (!wait_for_server(host, port, 30)) {
+            std::cerr << "Error: Could not connect to lemond at " << host << ":" << port << std::endl;
+            std::cerr << "Make sure lemond is running." << std::endl;
+            return 1;
+        }
+#if defined(__linux__) && !defined(__ANDROID__)
     }
+#endif
 
     std::cout << "Connected to lemond v" << LEMON_VERSION_STRING << std::endl;
 

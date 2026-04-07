@@ -10,10 +10,11 @@ Lemonade is a local LLM server providing GPU and NPU acceleration for running la
 
 ### Executables
 
-- **lemond** — Pure HTTP server. Handles REST API, routes requests to backends, manages model loading/unloading. Configured via `config.json` in the lemonade cache directory. CLI args: `[cache_dir] [--port PORT] [--host HOST]`.
+- **lemond** — Pure HTTP server. Handles REST API, routes requests to backends, manages model loading/unloading. Configured via `config.json` in the lemonade cache directory. CLI args: `[cache_dir] [--port PORT] [--host HOST]`. On Linux, also exposes the same HTTP API over a Unix Domain Socket at `$XDG_RUNTIME_DIR/lemonade/lemond.sock` (chmod 0600), enabling tray apps and sandboxed (Flatpak) clients to discover the TCP port via `GET /v1/health` without prior knowledge of it; supports systemd socket activation via `lemonade-server.socket`.
 - **lemonade** — CLI client (`src/cpp/cli/`). Commands: `list`, `pull`, `delete`, `run`, `status`, `logs`, `launch`, `backends`, `scan`, etc. Communicates with router via HTTP. Discovers running server via UDP beacon.
 - **LemonadeServer.exe** (Windows) — SUBSYSTEM:WINDOWS GUI app that embeds `lemond` and shows a system tray icon. Auto-starts via Windows startup folder.
-- **lemonade-tray** (macOS/Linux) — Lightweight tray client that connects to a running `lemond`. Platform code in `src/cpp/tray/platform/`.
+- **lemonade-tray** (macOS/Linux) — Lightweight tray client that connects to a running `lemond`. On Linux with a local host, discovers lemond and its TCP port via `GET /v1/health` over the UDS socket (falling back to HTTP polling for remote hosts). Platform code in `src/cpp/tray/platform/`.
+- **lemonade-server** — Deprecated backwards-compatibility shim. Delegates to `lemond` or `lemonade`.
 
 ### Backend Abstraction
 
@@ -121,6 +122,9 @@ python test/server_cli2.py
 
 # Endpoint tests (no inference backend needed)
 python test/server_endpoints.py
+
+# Unix Domain Socket tests (Linux only, no inference backend needed)
+python test/server_uds.py
 
 # LLM tests (specify wrapped server and backend)
 python test/server_llm.py --wrapped-server llamacpp --backend vulkan

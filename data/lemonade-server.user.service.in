@@ -1,0 +1,14 @@
+[Unit]
+Description=Lemonade Server (user session)
+After=default.target lemonade-server.socket
+Wants=lemonade-server.socket
+
+[Service]
+Type=simple
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/lemond
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGINT
+
+[Install]
+WantedBy=default.target

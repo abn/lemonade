@@ -1359,6 +1359,61 @@ if(UNIX AND NOT APPLE)
     install(FILES ${CMAKE_BINARY_DIR}/lemond.service
         DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/system
     )
+
+    # Configure systemd socket unit (system-level)
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/data/lemonade-server.socket.in
+        ${CMAKE_BINARY_DIR}/lemonade-server.socket
+        @ONLY
+    )
+
+    # Configure systemd user service and socket units
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/data/lemonade-server.user.service.in
+        ${CMAKE_BINARY_DIR}/lemonade-server.user.service
+        @ONLY
+    )
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/data/lemonade-server.user.socket.in
+        ${CMAKE_BINARY_DIR}/lemonade-server.user.socket
+        @ONLY
+    )
+
+    # Install systemd service and socket files (system-level)
+    install(FILES
+        ${CMAKE_BINARY_DIR}/lemonade-server.service
+        ${CMAKE_BINARY_DIR}/lemonade-server.socket
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/system
+    )
+
+    # Configure systemd user service and socket units
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/data/lemonade-server.user.service.in
+        ${CMAKE_BINARY_DIR}/lemonade-server.user.service
+        @ONLY
+    )
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/data/lemonade-server.user.socket.in
+        ${CMAKE_BINARY_DIR}/lemonade-server.user.socket
+        @ONLY
+    )
+
+    # Install systemd service and socket files (system-level)
+    install(FILES
+        ${CMAKE_BINARY_DIR}/lemonade-server.service
+        ${CMAKE_BINARY_DIR}/lemonade-server.socket
+>>>>>>> 7944beb4 (Expose lemond HTTP API over Unix Domain Socket on Linux)
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/system
+    )
+    # Install systemd user units (per-user session service and socket)
+    install(FILES ${CMAKE_BINARY_DIR}/lemonade-server.user.service
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user
+        RENAME lemonade-server.service
+    )
+    install(FILES ${CMAKE_BINARY_DIR}/lemonade-server.user.socket
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user
+        RENAME lemonade-server.socket
+    )
     # Create symlink in standard systemd search path only if not installing to /usr
     # (if prefix is /usr, the service is already in the standard location)
     if(NOT CMAKE_INSTALL_PREFIX STREQUAL "/usr")
@@ -1368,6 +1423,11 @@ if(UNIX AND NOT APPLE)
                 COMMAND ${CMAKE_COMMAND} -E create_symlink
                     ${CMAKE_INSTALL_PREFIX}/lib/systemd/system/lemond.service
                     \"\$ENV{DESTDIR}/usr/lib/systemd/system/lemond.service\"
+            )
+            execute_process(
+                COMMAND ${CMAKE_COMMAND} -E create_symlink
+                    ${CMAKE_INSTALL_PREFIX}/lib/systemd/system/lemonade-server.socket
+                    \"\$ENV{DESTDIR}/usr/lib/systemd/system/lemonade-server.socket\"
             )
         ")
     endif()

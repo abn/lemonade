@@ -1417,7 +1417,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test_type: [cli, endpoints, ollama, llamacpp-system, streaming-errors, env-vars]
+        test_type: [cli, endpoints, ollama, llamacpp-system, streaming-errors, env-vars, uds]
     env:
       LEMONADE_CI_MODE: "True"
       PYTHONIOENCODING: utf-8
@@ -1480,6 +1480,9 @@ jobs:
           elif [ "${{ matrix.test_type }}" = "env-vars" ]; then
               echo "Running environment variable tests..."
               $VENV_PYTHON test/server_env_vars.py --lemond-binary ./deb-extract/usr/bin/lemond
+          elif [ "${{ matrix.test_type }}" = "uds" ]; then
+              echo "Running Unix Domain Socket tests..."
+              $VENV_PYTHON test/server_uds.py
           fi
 
           echo "${{ matrix.test_type }} tests PASSED!"

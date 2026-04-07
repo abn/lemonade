@@ -43,6 +43,8 @@
 #ifdef __linux__
     #include <sys/ioctl.h>
     #include <fcntl.h>
+    #include <sys/stat.h>
+    #include <sys/un.h>
     #include <unistd.h>
     #include <libdrm/drm.h>
     #include "lemon/amdxdna_accel.h"
@@ -159,6 +161,16 @@ bool is_quiet_polling_path(const std::string& path) {
 
 } // namespace
 
+#if defined(__linux__) && !defined(__ANDROID__)
+
+// Thin httplib::Server subclass that allows injecting a pre-bound socket fd
+// (needed for systemd socket activation where the socket is already bound).
+struct UdsSocketServer : public httplib::Server {
+    void set_bound_fd(socket_t fd) { svr_sock_ = fd; }
+};
+
+#endif
+
 
 static const json MIME_TYPES = {
     {"mp3",  "audio/mpeg"},
@@ -247,6 +259,85 @@ void Server::setup_http_servers() {
     setup_routes(*http_server_v6_);
 }
 
+#if defined(__linux__) && !defined(__ANDROID__)
+
+std::string Server::compute_uds_socket_path() {
+    const char* xdg = std::getenv("XDG_RUNTIME_DIR");
+    std::string base;
+    if (xdg && *xdg) {
+        base = xdg;
+    } else {
+        uid_t uid = getuid();
+        base = (uid == 0) ? "/run" : "/run/user/" + std::to_string(static_cast<unsigned>(uid));
+    }
+    std::string dir = base + "/lemonade";
+    fs::create_directories(dir);
+    return dir + "/lemond.sock";
+}
+
+// Returns the socket fd passed by systemd socket activation, or -1 if not active.
+// Implements the LISTEN_FDS protocol without requiring libsystemd.
+int Server::get_systemd_listen_fd() {
+    const char* pid_str = std::getenv("LISTEN_PID");
+    const char* fds_str = std::getenv("LISTEN_FDS");
+    if (!pid_str || !fds_str) return -1;
+    pid_t pid = static_cast<pid_t>(std::strtol(pid_str, nullptr, 10));
+    int nfds = static_cast<int>(std::strtol(fds_str, nullptr, 10));
+    if (pid != getpid() || nfds < 1) return -1;
+    return 3; // SD_LISTEN_FDS_START
+}
+
+void Server::start_uds_server() {
+    uds_socket_path_ = compute_uds_socket_path();
+
+    auto uds_svr = std::make_unique<UdsSocketServer>();
+    uds_svr->set_address_family(AF_UNIX);
+    uds_svr->new_task_queue = [] { return new httplib::ThreadPool(4); };
+    setup_routes(*uds_svr);
+    setup_http_logger(*uds_svr);
+    http_server_uds_ = std::move(uds_svr);
+
+    http_uds_thread_ = std::thread([this]() {
+        int sd_fd = get_systemd_listen_fd();
+        if (sd_fd >= 0) {
+            // systemd socket activation: socket already bound by systemd
+            static_cast<UdsSocketServer*>(http_server_uds_.get())->set_bound_fd(sd_fd);
+            LOG(INFO, "Server") << "UDS HTTP server using systemd-activated socket" << std::endl;
+        } else {
+            // Remove any stale socket file from a prior run
+            ::unlink(uds_socket_path_.c_str());
+            // bind_to_port with a dummy port (1) — AF_UNIX ignores the port value
+            if (!http_server_uds_->bind_to_port(uds_socket_path_, 1)) {
+                LOG(ERROR, "Server") << "Failed to bind UDS HTTP server to " << uds_socket_path_ << std::endl;
+                return;
+            }
+            // Restrict to the owning user only (same protection as file permissions)
+            ::chmod(uds_socket_path_.c_str(), S_IRUSR | S_IWUSR);
+            LOG(INFO, "Server") << "UDS HTTP server listening on " << uds_socket_path_ << std::endl;
+        }
+        if (!http_server_uds_->listen_after_bind()) {
+            LOG(ERROR, "Server") << "UDS HTTP server listen_after_bind() failed" << std::endl;
+        }
+    });
+}
+
+void Server::stop_uds_server() {
+    if (http_server_uds_) {
+        http_server_uds_->stop();
+        // Join before unlink: guarantees the listen thread has fully exited
+        // and released the socket fd before we remove the file, preventing
+        // EADDRINUSE on rapid server restart.
+        if (http_uds_thread_.joinable())
+            http_uds_thread_.join();
+        // Remove socket file only if we created it (not systemd's)
+        if (get_systemd_listen_fd() < 0 && !uds_socket_path_.empty()) {
+            ::unlink(uds_socket_path_.c_str());
+        }
+    }
+}
+
+#endif // __linux__
+
 Server::~Server() {
     cancel_download_jobs();
     stop();
@@ -268,12 +359,14 @@ httplib::Server::HandlerResponse Server::authenticate_request(const httplib::Req
                         (req.path.rfind("/v1/", 0) == 0);
     bool is_internal_route = (req.path.rfind("/internal/", 0) == 0);
 
-    // Internal endpoints are restricted to loopback regardless of API key
+    // Internal endpoints are restricted to loopback regardless of API key.
+    // UDS connections have an empty remote_addr and are inherently local.
     if (is_internal_route) {
         // ::ffff:127.0.0.1 is how an IPv6 socket reports an IPv4 loopback connection
         // when bound without IPV6_V6ONLY (the default on macOS, and the configuration
         // lemond uses to accept both IPv4 and IPv6 on the same port).
-        bool is_loopback = (req.remote_addr == "127.0.0.1" ||
+        bool is_loopback = (req.remote_addr.empty() ||
+                            req.remote_addr == "127.0.0.1" ||
                             req.remote_addr == "::1" ||
                             req.remote_addr == "::ffff:127.0.0.1");
         if (!is_loopback) {
@@ -999,6 +1092,10 @@ void Server::run() {
         }
     }
 
+#if defined(__linux__) && !defined(__ANDROID__)
+    start_uds_server();
+#endif
+
     while (true) {
         // Check for shutdown signal from the main thread
         if (shutdown_requested_.load()) {
@@ -1156,6 +1253,9 @@ void Server::stop() {
     if (running_) {
         LOG(INFO, "Server") << "Stopping HTTP server..." << std::endl;
         udp_beacon_.stopBroadcasting();
+#if defined(__linux__) && !defined(__ANDROID__)
+        stop_uds_server();
+#endif
         http_server_v6_->stop();
         http_server_->stop();
         running_ = false;
@@ -1348,6 +1448,9 @@ void Server::handle_health(const httplib::Request& req, httplib::Response& res) 
     // Add version information
     response["version"] = LEMON_VERSION_STRING;
 
+    // TCP port — useful for clients connecting over UDS who need the HTTP port
+    response["port"] = port_.load();
+
     // Add model loaded information like Python implementation
     std::string loaded_model = router_->get_loaded_model();
 
@@ -1363,6 +1466,14 @@ void Server::handle_health(const httplib::Request& req, httplib::Response& res) 
     if (websocket_server_ && websocket_server_->is_running()) {
         response["websocket_port"] = websocket_server_->get_port();
     }
+
+#if defined(__linux__) && !defined(__ANDROID__)
+    // Expose UDS socket path so tray/Flatpak clients can confirm UDS is active.
+    // Absent when UDS failed to bind (e.g. XDG_RUNTIME_DIR unavailable).
+    if (!uds_socket_path_.empty()) {
+        response["uds_socket"] = uds_socket_path_;
+    }
+#endif
 
     res.set_content(response.dump(), "application/json");
 }

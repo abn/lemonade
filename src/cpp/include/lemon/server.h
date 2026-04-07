@@ -202,9 +202,24 @@ private:
     std::thread http_v6_thread_;
     std::thread model_cache_warmup_thread_;
 
-
     std::unique_ptr<httplib::Server> http_server_;
     std::unique_ptr<httplib::Server> http_server_v6_;
+
+#if defined(__linux__) && !defined(__ANDROID__)
+    // Unix Domain Socket HTTP server (Linux only).
+    // Exposes the same HTTP API as the TCP server over a well-known local
+    // socket ($XDG_RUNTIME_DIR/lemonade/lemond.sock) so that tray apps and
+    // sandboxed (Flatpak) clients can discover the TCP port without knowing
+    // it in advance.  Supports systemd socket activation.
+    std::unique_ptr<httplib::Server> http_server_uds_;
+    std::thread http_uds_thread_;
+    std::string uds_socket_path_;
+
+    static std::string compute_uds_socket_path();
+    static int get_systemd_listen_fd();
+    void start_uds_server();
+    void stop_uds_server();
+#endif
 
     std::unique_ptr<Router> router_;
     std::unique_ptr<ModelManager> model_manager_;

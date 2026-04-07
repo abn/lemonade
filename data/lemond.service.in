@@ -1,7 +1,8 @@
 [Unit]
 Description=Lemonade Server
 Documentation=https://lemonade-server.ai/docs/
-After=network-online.target
+After=network-online.target lemonade-server.socket
+Wants=lemonade-server.socket
 
 [Service]
 Type=simple
