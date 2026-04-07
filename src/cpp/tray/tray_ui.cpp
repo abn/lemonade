@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -47,9 +48,11 @@ std::string TrayUI::get_connect_host() const {
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
-TrayUI::TrayUI(int port, const std::string& host, bool silent)
+TrayUI::TrayUI(int port, const std::string& host,
+               const std::string& uds_path, bool silent)
     : port_(port)
     , host_(host)
+    , uds_path_(uds_path)
     , silent_(silent)
     , recipe_options_(nlohmann::json::object())
 {
@@ -93,7 +96,9 @@ bool TrayUI::initialize() {
     }
 
     tray_->set_ready_callback([this]() {
-        if (!silent_) {
+        // Suppress the startup notification when the tray launches in disconnected
+        // state (port_==0); a reconnect doesn't warrant a "server is running" pop-up.
+        if (!silent_ && port_ > 0) {
             show_notification("Woohoo!", "Lemonade Server is running! Right-click the tray icon to access options.");
         }
     });
@@ -162,11 +167,6 @@ void TrayUI::stop() {
 // ---------------------------------------------------------------------------
 
 std::string TrayUI::http_get(const std::string& endpoint) {
-    httplib::Client cli(get_connect_host(), port_);
-    cli.set_connection_timeout(2);
-    cli.set_read_timeout(5);
-
-    // Pass API key if set - prefer admin key over regular API key
     const char* admin_api_key = std::getenv("LEMONADE_ADMIN_API_KEY");
     const char* api_key = admin_api_key ? admin_api_key : std::getenv("LEMONADE_API_KEY");
     httplib::Headers headers;
@@ -174,19 +174,27 @@ std::string TrayUI::http_get(const std::string& endpoint) {
         headers.emplace("Authorization", std::string("Bearer ") + api_key);
     }
 
-    auto res = cli.Get(endpoint, headers);
-    if (res && res->status == 200) {
-        return res->body;
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (!uds_path_.empty()) {
+        httplib::Client cli(uds_path_);
+        cli.set_address_family(AF_UNIX);
+        cli.set_connection_timeout(2);
+        cli.set_read_timeout(5);
+        auto res = cli.Get(endpoint, headers);
+        if (res && res->status == 200) return res->body;
+        return "";
     }
+#endif
+
+    httplib::Client cli(get_connect_host(), port_);
+    cli.set_connection_timeout(2);
+    cli.set_read_timeout(5);
+    auto res = cli.Get(endpoint, headers);
+    if (res && res->status == 200) return res->body;
     return "";
 }
 
 std::string TrayUI::http_post(const std::string& endpoint, const std::string& body) {
-    httplib::Client cli(get_connect_host(), port_);
-    cli.set_connection_timeout(2);
-    cli.set_read_timeout(30);
-
-    // Pass API key if set - prefer admin key over regular API key
     const char* admin_api_key = std::getenv("LEMONADE_ADMIN_API_KEY");
     const char* api_key = admin_api_key ? admin_api_key : std::getenv("LEMONADE_API_KEY");
     httplib::Headers headers;
@@ -194,10 +202,23 @@ std::string TrayUI::http_post(const std::string& endpoint, const std::string& bo
         headers.emplace("Authorization", std::string("Bearer ") + api_key);
     }
 
-    auto res = cli.Post(endpoint, headers, body, "application/json");
-    if (res && (res->status == 200 || res->status == 204)) {
-        return res->body;
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (!uds_path_.empty()) {
+        httplib::Client cli(uds_path_);
+        cli.set_address_family(AF_UNIX);
+        cli.set_connection_timeout(2);
+        cli.set_read_timeout(30);
+        auto res = cli.Post(endpoint, headers, body, "application/json");
+        if (res && (res->status == 200 || res->status == 204)) return res->body;
+        return "";
     }
+#endif
+
+    httplib::Client cli(get_connect_host(), port_);
+    cli.set_connection_timeout(2);
+    cli.set_read_timeout(30);
+    auto res = cli.Post(endpoint, headers, body, "application/json");
+    if (res && (res->status == 200 || res->status == 204)) return res->body;
     return "";
 }
 
@@ -212,6 +233,13 @@ std::pair<bool, std::vector<LoadedModelInfo>> TrayUI::fetch_server_state() {
         if (body.empty()) return {false, loaded_models};
 
         auto health = nlohmann::json::parse(body);
+        // Keep port_ in sync: lemond reports its active TCP port in health.
+        // This drives reconnect after a disconnected start (port_==0) and
+        // correctly follows lemond if it restarts on a different port.
+        if (health.contains("port") && health["port"].is_number_integer()) {
+            int reported = health["port"].get<int>();
+            if (reported > 0) port_ = reported;
+        }
         if (health.contains("all_models_loaded") && health["all_models_loaded"].is_array()) {
             for (const auto& model : health["all_models_loaded"]) {
                 LoadedModelInfo info;
@@ -284,12 +312,11 @@ std::vector<ModelInfo> TrayUI::get_downloaded_models() {
 void TrayUI::build_menu() {
     if (!tray_) return;
 
-    // Fetch once, use for both the menu and the cache
     auto [reachable, loaded_models] = fetch_server_state();
-    auto available_models = get_downloaded_models();
+    auto available_models = reachable ? get_downloaded_models() : std::vector<ModelInfo>{};
     if (reachable) fetch_runtime_config();
 
-    Menu menu = create_menu(loaded_models, available_models);
+    Menu menu = create_menu(reachable, loaded_models, available_models);
     tray_->set_menu(menu);
 
     std::lock_guard<std::mutex> lock(state_mutex_);
@@ -308,7 +335,8 @@ void TrayUI::refresh_menu() {
 bool TrayUI::menu_needs_refresh() {
     // Fetch outside the lock to avoid blocking other threads during HTTP calls
     auto [reachable, loaded] = fetch_server_state();
-    auto current_available = get_downloaded_models();
+    auto current_available = reachable ? get_downloaded_models()
+                                       : std::vector<ModelInfo>{};
 
     std::lock_guard<std::mutex> lock(state_mutex_);
     if (reachable != last_menu_server_reachable_) return true;
@@ -317,9 +345,19 @@ bool TrayUI::menu_needs_refresh() {
     return false;
 }
 
-Menu TrayUI::create_menu(const std::vector<LoadedModelInfo>& loaded_models,
+Menu TrayUI::create_menu(bool server_reachable,
+                         const std::vector<LoadedModelInfo>& loaded_models,
                          const std::vector<ModelInfo>& available_models) {
     Menu menu;
+
+    if (!server_reachable) {
+        menu.add_item(MenuItem::Action("Server not running", nullptr, false));
+        menu.add_separator();
+        menu.add_item(MenuItem::Action("Documentation", [this]() { on_open_documentation(); }));
+        menu.add_separator();
+        menu.add_item(MenuItem::Action("Quit Lemonade", [this]() { on_quit(); }));
+        return menu;
+    }
 
     // Open app — uses lemonade:// protocol, falls back to web app
     menu.add_item(MenuItem::Action("Open Lemonade App", [this]() { open_desktop_app(); }));

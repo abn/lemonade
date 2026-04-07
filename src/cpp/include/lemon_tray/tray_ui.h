@@ -42,7 +42,12 @@ struct LoadedModelInfo {
 
 class TrayUI {
 public:
-    TrayUI(int port, const std::string& host, bool silent = false);
+    // uds_path: path to lemond's Unix Domain Socket (Linux only).
+    //   When non-empty, all HTTP calls use the UDS instead of TCP, enabling
+    //   sandboxed (Flatpak) clients and allowing the tray to start before lemond
+    //   is running (port==0) and reconnect automatically once it comes up.
+    TrayUI(int port, const std::string& host,
+           const std::string& uds_path = "", bool silent = false);
     ~TrayUI();
 
     bool initialize();
@@ -63,7 +68,8 @@ private:
     // Menu
     void build_menu();
     void refresh_menu();
-    Menu create_menu(const std::vector<LoadedModelInfo>& loaded_models,
+    Menu create_menu(bool server_reachable,
+                     const std::vector<LoadedModelInfo>& loaded_models,
                      const std::vector<ModelInfo>& available_models);
     bool menu_needs_refresh();
 
@@ -96,6 +102,7 @@ private:
     // State
     int port_;
     std::string host_;
+    std::string uds_path_;  // Non-empty on Linux when UDS transport is active
     int max_loaded_models_ = 1;  // Mirrors server config; default 1 per configuration.md
     bool silent_;  // Suppress startup notification
     std::unique_ptr<TrayInterface> tray_;

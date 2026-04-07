@@ -329,39 +329,39 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, tray_signal_handler);
     signal(SIGTERM, tray_signal_handler);
 
-    // On Linux with a local host, discover the server via the Unix Domain Socket.
-    // This works with systemd socket activation (the socket exists even before
-    // lemond starts) and lets the tray learn the actual TCP port dynamically.
+    // On Linux with a local host, discover lemond via its Unix Domain Socket.
+    // A single quick attempt is made at startup; if lemond is not yet running
+    // the tray starts immediately in a disconnected state and reconnects
+    // automatically via the background refresh loop once lemond comes up
+    // (e.g. via systemd socket activation on first connection attempt).
 #if defined(__linux__) && !defined(__ANDROID__)
     if (is_local_host(host)) {
         std::string uds_path = lemond_uds_path();
-        std::cout << "Waiting for lemond via UDS socket at " << uds_path << "..." << std::endl;
-        if (!wait_for_uds_server(uds_path, 30, port)) {
-            std::cerr << "Error: Could not connect to lemond via " << uds_path << std::endl;
-            std::cerr << "Make sure lemond is running (or lemonade-server.socket is enabled)." << std::endl;
+        wait_for_uds_server(uds_path, 1, port);  // best-effort; port stays 0 if not up yet
+
+        lemon_tray::TrayUI tray(port, host, uds_path);
+        if (!tray.initialize()) {
             return 1;
         }
-    } else {
-#endif
-        std::cout << "Connecting to lemond at " << host << ":" << port << "..." << std::endl;
-        if (!wait_for_server(host, port, 30)) {
-            std::cerr << "Error: Could not connect to lemond at " << host << ":" << port << std::endl;
-            std::cerr << "Make sure lemond is running." << std::endl;
-            return 1;
-        }
-#if defined(__linux__) && !defined(__ANDROID__)
+        tray.run();
+        return 0;
     }
 #endif
 
+    // macOS / Linux remote host: block until server is reachable
+    std::cout << "Connecting to lemond at " << host << ":" << port << "..." << std::endl;
+    if (!wait_for_server(host, port, 30)) {
+        std::cerr << "Error: Could not connect to lemond at " << host << ":" << port << std::endl;
+        std::cerr << "Make sure lemond is running." << std::endl;
+        return 1;
+    }
     std::cout << "Connected to lemond v" << LEMON_VERSION_STRING << std::endl;
 
-    // Create and run tray UI
     lemon_tray::TrayUI tray(port, host);
     if (!tray.initialize()) {
         return 1;
     }
-
-    tray.run();  // Blocks until quit
+    tray.run();
 
     // On macOS/Linux, just exit — the router keeps running
     return 0;
