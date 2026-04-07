@@ -39,6 +39,8 @@
     #include <unistd.h>
 #endif
 
+#include <httplib.h>
+
 #include "lemon/utils/aixlog.hpp"
 
 static const std::vector<std::string> VALID_LABELS = {
@@ -701,6 +703,38 @@ struct BeaconListener {
 };
 
 // Listen for a UDP beacon from localhost and return the server's HTTP port, or 0 if none found
+#if defined(__linux__) && !defined(__ANDROID__)
+// Single-attempt UDS discovery: connect to lemond's Unix Domain Socket and read
+// the active TCP port from GET /v1/health.  Returns 0 on failure.
+// Mirrors compute_uds_socket_path() in server.cpp and lemond_uds_path() in tray/main.cpp.
+static int try_uds_discover_port() {
+    const char* xdg = std::getenv("XDG_RUNTIME_DIR");
+    std::string base;
+    if (xdg && *xdg) {
+        base = xdg;
+    } else {
+        uid_t uid = getuid();
+        base = (uid == 0) ? "/run" : "/run/user/" + std::to_string(static_cast<unsigned>(uid));
+    }
+    std::string socket_path = base + "/lemonade/lemond.sock";
+
+    try {
+        httplib::Client cli(socket_path);
+        cli.set_address_family(AF_UNIX);
+        cli.set_connection_timeout(1);
+        cli.set_read_timeout(2);
+        auto res = cli.Get("/v1/health");
+        if (res && res->status == 200) {
+            auto health = nlohmann::json::parse(res->body);
+            if (health.contains("port") && health["port"].is_number_integer()) {
+                return health["port"].get<int>();
+            }
+        }
+    } catch (...) {}
+    return 0;
+}
+#endif
+
 static int discover_local_server_port() {
     BeaconListener listener(13305, 250);
     if (!listener.valid) return 0;
@@ -1199,10 +1233,14 @@ int main(int argc, char* argv[]) {
     }
     config.codex_use_user_config = (codex_provider_opt != nullptr && codex_provider_opt->count() > 0);
 
-    // Auto-discover local server via UDP beacon if the default connection fails
-    // Skip when: no command given, scan command, or user explicitly set --host/--port
+    // Auto-discover local server if the default connection fails.
+    // Skip when: no command given, scan command, or the user has explicitly targeted
+    // a server via --host/--port (CLI) or LEMONADE_HOST/LEMONADE_PORT (env vars).
+    // CLI11's count() only reflects CLI args; check env vars separately.
     bool has_command = !app.get_subcommands().empty();
-    bool explicit_target = (host_opt->count() > 0 || port_opt->count() > 0);
+    bool explicit_target = (host_opt->count() > 0 || port_opt->count() > 0 ||
+                            std::getenv("LEMONADE_HOST") != nullptr ||
+                            std::getenv("LEMONADE_PORT") != nullptr);
     if (has_command && scan_cmd->count() == 0 && !explicit_target) {
         // Localhost responds in <10ms; use short timeout. Remote hosts need more.
         bool is_local = (config.host.empty() || config.host == "127.0.0.1" ||
@@ -1210,10 +1248,27 @@ int main(int argc, char* argv[]) {
         int live_timeout_ms = is_local ? 100 : 3000;
 
         if (!try_live_check(config.host, config.port, config.api_key, live_timeout_ms)) {
+#if defined(__linux__) && !defined(__ANDROID__)
+            // On Linux, try UDS first: instant, no broadcast, works when lemond
+            // is on a non-default port.  Fall back to UDP beacon if UDS fails.
+            if (is_local) {
+                int uds_port = try_uds_discover_port();
+                if (uds_port > 0) {
+                    config.port = uds_port;
+                } else {
+                    int discovered_port = discover_local_server_port();
+                    if (discovered_port > 0) config.port = discovered_port;
+                }
+            } else {
+                int discovered_port = discover_local_server_port();
+                if (discovered_port > 0) config.port = discovered_port;
+            }
+#else
             int discovered_port = discover_local_server_port();
             if (discovered_port > 0 && discovered_port != config.port) {
                 config.port = discovered_port;
             }
+#endif
         }
     }
 
