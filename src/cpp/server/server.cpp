@@ -311,8 +311,8 @@ void Server::start_uds_server() {
                 LOG(ERROR, "Server") << "Failed to bind UDS HTTP server to " << uds_socket_path_ << std::endl;
                 return;
             }
-            // Restrict to the owning user only (same protection as file permissions)
-            ::chmod(uds_socket_path_.c_str(), S_IRUSR | S_IWUSR);
+            // Restrict to the owning user and group only (same protection as file permissions)
+            ::chmod(uds_socket_path_.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
             LOG(INFO, "Server") << "UDS HTTP server listening on " << uds_socket_path_ << std::endl;
         }
         if (!http_server_uds_->listen_after_bind()) {
