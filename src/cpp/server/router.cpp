@@ -1090,8 +1090,16 @@ json Router::chat_completion(const json& request) {
                 std::string text_output = "";
                 if (response.contains("usage")) {
                     auto usage = response["usage"];
-                    if (usage.contains("prompt_tokens")) usage_payload["prompt_tokens"] = usage["prompt_tokens"].get<int>();
-                    if (usage.contains("completion_tokens")) usage_payload["completion_tokens"] = usage["completion_tokens"].get<int>();
+                    if (usage.contains("prompt_tokens")) {
+                        usage_payload["prompt_tokens"] = usage["prompt_tokens"].get<int>();
+                    } else if (usage.contains("input_tokens")) {
+                        usage_payload["prompt_tokens"] = usage["input_tokens"].get<int>();
+                    }
+                    if (usage.contains("completion_tokens")) {
+                        usage_payload["completion_tokens"] = usage["completion_tokens"].get<int>();
+                    } else if (usage.contains("output_tokens")) {
+                        usage_payload["completion_tokens"] = usage["output_tokens"].get<int>();
+                    }
                 }
                 if (response.contains("timings")) {
                     auto timings = response["timings"];
@@ -1181,8 +1189,16 @@ json Router::completion(const json& request) {
                 std::string text_output = "";
                 if (response.contains("usage")) {
                     auto usage = response["usage"];
-                    if (usage.contains("prompt_tokens")) usage_payload["prompt_tokens"] = usage["prompt_tokens"].get<int>();
-                    if (usage.contains("completion_tokens")) usage_payload["completion_tokens"] = usage["completion_tokens"].get<int>();
+                    if (usage.contains("prompt_tokens")) {
+                        usage_payload["prompt_tokens"] = usage["prompt_tokens"].get<int>();
+                    } else if (usage.contains("input_tokens")) {
+                        usage_payload["prompt_tokens"] = usage["input_tokens"].get<int>();
+                    }
+                    if (usage.contains("completion_tokens")) {
+                        usage_payload["completion_tokens"] = usage["completion_tokens"].get<int>();
+                    } else if (usage.contains("output_tokens")) {
+                        usage_payload["completion_tokens"] = usage["output_tokens"].get<int>();
+                    }
                 }
 
                 if (response.contains("choices") && response["choices"].is_array() && !response["choices"].empty()) {
@@ -1241,7 +1257,11 @@ json Router::embeddings(const json& request) {
                 nlohmann::json usage_payload = nlohmann::json::object();
                 if (response.contains("usage")) {
                     auto usage = response["usage"];
-                    if (usage.contains("prompt_tokens")) usage_payload["prompt_tokens"] = usage["prompt_tokens"].get<int>();
+                    if (usage.contains("prompt_tokens")) {
+                        usage_payload["prompt_tokens"] = usage["prompt_tokens"].get<int>();
+                    } else if (usage.contains("input_tokens")) {
+                        usage_payload["prompt_tokens"] = usage["input_tokens"].get<int>();
+                    }
                     if (usage.contains("total_tokens")) usage_payload["total_tokens"] = usage["total_tokens"].get<int>();
                 }
                 std::string output_dump = "";
@@ -1293,7 +1313,11 @@ json Router::reranking(const json& request) {
                 nlohmann::json usage_payload = nlohmann::json::object();
                 if (response.contains("usage")) {
                     auto usage = response["usage"];
-                    if (usage.contains("prompt_tokens")) usage_payload["prompt_tokens"] = usage["prompt_tokens"].get<int>();
+                    if (usage.contains("prompt_tokens")) {
+                        usage_payload["prompt_tokens"] = usage["prompt_tokens"].get<int>();
+                    } else if (usage.contains("input_tokens")) {
+                        usage_payload["prompt_tokens"] = usage["input_tokens"].get<int>();
+                    }
                     if (usage.contains("total_tokens")) usage_payload["total_tokens"] = usage["total_tokens"].get<int>();
                 }
                 span->end_with_success(usage_payload, response.dump());
