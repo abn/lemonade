@@ -95,65 +95,75 @@ void StreamingProxy::forward_sse_stream(
         }
     };
 
-    auto result = utils::HttpClient::post_stream(
-        backend_url,
-        request_body,
-        [&sink, &line_buffer, &has_done_marker, &has_first_token,
-         &time_to_first_token, &start_time, &on_chunk, &process_line](const char* data, size_t length) {
-            if (on_chunk) {
-                on_chunk();
-            }
+    utils::HttpResponse result;
+    bool caught_exception = false;
+    try {
+        result = utils::HttpClient::post_stream(
+            backend_url,
+            request_body,
+            [&sink, &line_buffer, &has_done_marker, &has_first_token,
+             &time_to_first_token, &start_time, &on_chunk, &process_line](const char* data, size_t length) {
+                if (on_chunk) {
+                    on_chunk();
+                }
 
-            line_buffer.append(data, length);
-            process_sse_lines(line_buffer, process_line);
+                line_buffer.append(data, length);
+                process_sse_lines(line_buffer, process_line);
 
-            std::string chunk(data, length);
-            if (!has_first_token && chunk.find("data: ") != std::string::npos) {
-                has_first_token = true;
-                time_to_first_token = std::chrono::duration<double>(
-                    std::chrono::steady_clock::now() - start_time).count();
-            }
+                std::string chunk(data, length);
+                if (!has_first_token && chunk.find("data: ") != std::string::npos) {
+                    has_first_token = true;
+                    time_to_first_token = std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - start_time).count();
+                }
 
-            if (chunk.find("data: [DONE]") != std::string::npos) {
-                has_done_marker = true;
-            }
+                if (chunk.find("data: [DONE]") != std::string::npos) {
+                    has_done_marker = true;
+                }
 
-            if (!sink.write(data, length)) {
-                return false;
-            }
+                if (!sink.write(data, length)) {
+                    return false;
+                }
 
-            return true;
-        },
-        {},
-        timeout_seconds
-    );
-
-    const bool transport_interrupted =
-        result.curl_code == CURLE_PARTIAL_FILE || result.curl_code == CURLE_RECV_ERROR;
-
-    if (result.curl_code != CURLE_OK) {
+                return true;
+            },
+            {},
+            timeout_seconds
+        );
+    } catch (const std::exception& e) {
         stream_error = true;
-        if (result.curl_code == CURLE_WRITE_ERROR) {
-            LOG(WARNING, "StreamingProxy") << "Client disconnected during SSE stream (CURL error: " << result.curl_error << ")" << std::endl;
-            telemetry.error_message = "Client disconnected during stream";
-        } else if (transport_interrupted && !has_done_marker) {
-            // This is the important crash path: HTTP headers may have been sent and
-            // some bytes may even have reached the client, but the SSE protocol never
-            // completed. Do not synthesize [DONE], because that hides backend crashes
-            // from the router and leaves stale loaded-model state behind.
-            throw std::runtime_error(
-                "backend connection failed during SSE stream before DONE: CURL error: " +
-                result.curl_error);
-        } else {
-            LOG(ERROR, "StreamingProxy") << "SSE stream failed: CURL error: " << result.curl_error << std::endl;
-            telemetry.error_message = "SSE stream failed: CURL error: " + result.curl_error;
-        }
+        caught_exception = true;
+        telemetry.error_message = e.what();
     }
 
-    if (result.status_code != 200) {
-        stream_error = true;
-        LOG(ERROR, "StreamingProxy") << "Backend returned error: " << result.status_code << std::endl;
-        telemetry.error_message = "Backend returned error status code: " + std::to_string(result.status_code);
+    if (!caught_exception) {
+        const bool transport_interrupted =
+            result.curl_code == CURLE_PARTIAL_FILE || result.curl_code == CURLE_RECV_ERROR;
+
+        if (result.curl_code != CURLE_OK) {
+            stream_error = true;
+            if (result.curl_code == CURLE_WRITE_ERROR) {
+                LOG(WARNING, "StreamingProxy") << "Client disconnected during SSE stream (CURL error: " << result.curl_error << ")" << std::endl;
+                telemetry.error_message = "Client disconnected during stream";
+            } else if (transport_interrupted && !has_done_marker) {
+                // This is the important crash path: HTTP headers may have been sent and
+                // some bytes may even have reached the client, but the SSE protocol never
+                // completed. Do not synthesize [DONE], because that hides backend crashes
+                // from the router and leaves stale loaded-model state behind.
+                throw std::runtime_error(
+                    "backend connection failed during SSE stream before DONE: CURL error: " +
+                    result.curl_error);
+            } else {
+                LOG(ERROR, "StreamingProxy") << "SSE stream failed: CURL error: " << result.curl_error << std::endl;
+                telemetry.error_message = "SSE stream failed: CURL error: " + result.curl_error;
+            }
+        }
+
+        if (result.status_code != 200) {
+            stream_error = true;
+            LOG(ERROR, "StreamingProxy") << "Backend returned error: " << result.status_code << std::endl;
+            telemetry.error_message = "Backend returned error status code: " + std::to_string(result.status_code);
+        }
     }
 
     if (!stream_error) {
@@ -315,6 +325,38 @@ void StreamingProxy::process_sse_lines(std::string& line_buffer, std::function<v
             line.pop_back();
         }
         line_callback(line);
+    }
+}
+
+void StreamingProxy::accumulate_responses_delta(const nlohmann::json& parsed, std::string& accumulated_text) {
+    // Extract delta from standard OpenAI-compatible choices array
+    if (parsed.contains("choices") && parsed["choices"].is_array() && !parsed["choices"].empty()) {
+        auto delta = parsed["choices"][0]["delta"];
+        if (delta.contains("content") && delta["content"].is_string()) {
+            accumulated_text += delta["content"].get<std::string>();
+        }
+    }
+    // Extract direct text response (e.g. for legacy or simplified chunk structures)
+    if (parsed.contains("response") && parsed["response"].is_string()) {
+        accumulated_text += parsed["response"].get<std::string>();
+    }
+    // Top-level delta extraction:
+    // When the 'type' field is present, we constrain the delta extraction to ONLY append
+    // if type == "response.output_text.delta" (for Responses API compatibility).
+    // When the 'type' field is NOT present, we fall back to extracting and appending
+    // the delta directly for backward compatibility with older chunk designs.
+    if (parsed.contains("delta")) {
+        bool should_extract_delta = true;
+        if (parsed.contains("type")) {
+            should_extract_delta = (parsed["type"] == "response.output_text.delta");
+        }
+        if (should_extract_delta) {
+            if (parsed["delta"].is_string()) {
+                accumulated_text += parsed["delta"].get<std::string>();
+            } else if (parsed["delta"].is_object() && parsed["delta"].contains("text") && parsed["delta"]["text"].is_string()) {
+                accumulated_text += parsed["delta"]["text"].get<std::string>();
+            }
+        }
     }
 }
 

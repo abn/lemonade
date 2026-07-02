@@ -225,6 +225,113 @@ int main() {
         }
     }
 
+    // --- accumulate_responses_delta tests ---
+    std::printf("===========================================\n");
+    {
+        // a) Verify that chunk type "response.output_text.delta" with string delta contributes to accumulated_text.
+        {
+            std::string acc = "";
+            nlohmann::json chunk = {
+                {"type", "response.output_text.delta"},
+                {"delta", "hello"}
+            };
+            lemon::StreamingProxy::accumulate_responses_delta(chunk, acc);
+            check_eq("accumulate_responses_delta: type output_text.delta + string delta", acc, "hello");
+        }
+
+        // b) Verify that chunk type "response.output_text.delta" with object delta (text field) contributes to accumulated_text.
+        {
+            std::string acc = "";
+            nlohmann::json chunk = {
+                {"type", "response.output_text.delta"},
+                {"delta", {{"text", " world"}}}
+            };
+            lemon::StreamingProxy::accumulate_responses_delta(chunk, acc);
+            check_eq("accumulate_responses_delta: type output_text.delta + object delta", acc, " world");
+        }
+
+        // c) Verify that a non-text event (e.g., type == "response.audio.delta" or type == "response.tool.delta") does NOT contribute to accumulated_text.
+        {
+            std::string acc = "";
+            nlohmann::json audio_chunk = {
+                {"type", "response.audio.delta"},
+                {"delta", "audio_data"}
+            };
+            lemon::StreamingProxy::accumulate_responses_delta(audio_chunk, acc);
+            check_eq("accumulate_responses_delta: non-text type response.audio.delta (string)", acc, "");
+
+            nlohmann::json tool_chunk = {
+                {"type", "response.tool.delta"},
+                {"delta", {{"text", "tool_data"}}}
+            };
+            lemon::StreamingProxy::accumulate_responses_delta(tool_chunk, acc);
+            check_eq("accumulate_responses_delta: non-text type response.tool.delta (object)", acc, "");
+        }
+
+        // d) Verify that chunks without 'type' (fallback/OpenAI chat completion chunks) still contribute to accumulated_text.
+        {
+            std::string acc = "";
+            nlohmann::json chunk_no_type_string = {
+                {"delta", "fallback string"}
+            };
+            lemon::StreamingProxy::accumulate_responses_delta(chunk_no_type_string, acc);
+            check_eq("accumulate_responses_delta: no type + string delta", acc, "fallback string");
+
+            acc = "";
+            nlohmann::json chunk_no_type_obj = {
+                {"delta", {{"text", "fallback object"}}}
+            };
+            lemon::StreamingProxy::accumulate_responses_delta(chunk_no_type_obj, acc);
+            check_eq("accumulate_responses_delta: no type + object delta", acc, "fallback object");
+
+            acc = "";
+            nlohmann::json chunk_openai = {
+                {"choices", nlohmann::json::array({{{"delta", {{"content", "OpenAI content"}}}}})}
+            };
+            lemon::StreamingProxy::accumulate_responses_delta(chunk_openai, acc);
+            check_eq("accumulate_responses_delta: no type + choices array delta", acc, "OpenAI content");
+        }
+    }
+
+    // --- Transport error handling tests ---
+    std::printf("===========================================\n");
+    {
+        httplib::DataSink sink;
+        sink.write = [](const char* data, size_t len) {
+            return true;
+        };
+        sink.done = []() {};
+
+        bool callback_called = false;
+        std::string error_msg = "";
+
+        lemon::StreamingProxy::forward_sse_stream(
+            "http://127.0.0.1:9999/bad",
+            "{}",
+            sink,
+            [&callback_called, &error_msg](const lemon::StreamingProxy::TelemetryData& tel) {
+                callback_called = true;
+                error_msg = tel.error_message;
+            },
+            1 // short timeout
+        );
+
+        if (callback_called) {
+            std::printf("[PASS] forward_sse_stream: callback was called\n");
+        } else {
+            std::printf("[FAIL] forward_sse_stream: callback was NOT called\n");
+            ++g_failures;
+        }
+
+        bool has_curl_error = (error_msg.find("CURL error") != std::string::npos);
+        if (has_curl_error) {
+            std::printf("[PASS] forward_sse_stream: error message contains CURL error: \"%s\"\n", error_msg.c_str());
+        } else {
+            std::printf("[FAIL] forward_sse_stream: error message does NOT contain CURL error: \"%s\"\n", error_msg.c_str());
+            ++g_failures;
+        }
+    }
+
     std::printf("===========================================\n");
     if (g_failures > 0) {
         std::printf("Tests finished: %d FAILURE(S)\n", g_failures);

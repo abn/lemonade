@@ -56,6 +56,8 @@ public:
 
     static TelemetryData parse_telemetry(const std::string& buffer);
 
+    static void accumulate_responses_delta(const nlohmann::json& parsed, std::string& accumulated_text);
+
 private:
 };
 
