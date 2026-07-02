@@ -9,6 +9,61 @@
 
 namespace lemon {
 
+namespace {
+
+void extract_telemetry_from_chunk(const nlohmann::json& chunk, StreamingProxy::TelemetryData& telemetry) {
+    nlohmann::json usage;
+    if (chunk.contains("usage")) {
+        usage = chunk["usage"];
+    } else if (chunk.contains("response") && chunk["response"].is_object() && chunk["response"].contains("usage")) {
+        usage = chunk["response"]["usage"];
+    }
+
+    if (usage.is_object()) {
+        if (usage.contains("prompt_tokens")) {
+            telemetry.input_tokens = usage["prompt_tokens"].get<int>();
+        } else if (usage.contains("input_tokens")) {
+            telemetry.input_tokens = usage["input_tokens"].get<int>();
+        }
+        if (usage.contains("completion_tokens")) {
+            telemetry.output_tokens = usage["completion_tokens"].get<int>();
+        } else if (usage.contains("output_tokens")) {
+            telemetry.output_tokens = usage["output_tokens"].get<int>();
+        }
+        if (usage.contains("prefill_duration_ttft")) {
+            telemetry.time_to_first_token = usage["prefill_duration_ttft"].get<double>();
+        }
+        if (usage.contains("decoding_speed_tps")) {
+            telemetry.tokens_per_second = usage["decoding_speed_tps"].get<double>();
+        }
+    }
+
+    nlohmann::json timings;
+    if (chunk.contains("timings")) {
+        timings = chunk["timings"];
+    } else if (chunk.contains("response") && chunk["response"].is_object() && chunk["response"].contains("timings")) {
+        timings = chunk["response"]["timings"];
+    }
+
+    if (timings.is_object()) {
+        if (timings.contains("prompt_n")) {
+            telemetry.input_tokens = timings["prompt_n"].get<int>();
+        }
+        if (timings.contains("predicted_n")) {
+            telemetry.output_tokens = timings["predicted_n"].get<int>();
+        }
+        if (timings.contains("prompt_ms")) {
+            telemetry.time_to_first_token = timings["prompt_ms"].get<double>() / 1000.0;
+        }
+        if (timings.contains("predicted_per_second")) {
+            telemetry.tokens_per_second = timings["predicted_per_second"].get<double>();
+        }
+    }
+}
+
+} // namespace
+
+
 void StreamingProxy::forward_sse_stream(
     const std::string& backend_url,
     const std::string& request_body,
@@ -35,54 +90,7 @@ void StreamingProxy::forward_sse_stream(
         if (!json_str.empty() && json_str != "[DONE]") {
             try {
                 auto chunk = json::parse(json_str);
-
-                nlohmann::json usage;
-                if (chunk.contains("usage")) {
-                    usage = chunk["usage"];
-                } else if (chunk.contains("response") && chunk["response"].is_object() && chunk["response"].contains("usage")) {
-                    usage = chunk["response"]["usage"];
-                }
-
-                if (!usage.is_null()) {
-                    if (usage.contains("prompt_tokens")) {
-                        telemetry.input_tokens = usage["prompt_tokens"].get<int>();
-                    } else if (usage.contains("input_tokens")) {
-                        telemetry.input_tokens = usage["input_tokens"].get<int>();
-                    }
-                    if (usage.contains("completion_tokens")) {
-                        telemetry.output_tokens = usage["completion_tokens"].get<int>();
-                    } else if (usage.contains("output_tokens")) {
-                        telemetry.output_tokens = usage["output_tokens"].get<int>();
-                    }
-                    if (usage.contains("prefill_duration_ttft")) {
-                        telemetry.time_to_first_token = usage["prefill_duration_ttft"].get<double>();
-                    }
-                    if (usage.contains("decoding_speed_tps")) {
-                        telemetry.tokens_per_second = usage["decoding_speed_tps"].get<double>();
-                    }
-                }
-
-                nlohmann::json timings;
-                if (chunk.contains("timings")) {
-                    timings = chunk["timings"];
-                } else if (chunk.contains("response") && chunk["response"].is_object() && chunk["response"].contains("timings")) {
-                    timings = chunk["response"]["timings"];
-                }
-
-                if (!timings.is_null()) {
-                    if (timings.contains("prompt_n")) {
-                        telemetry.input_tokens = timings["prompt_n"].get<int>();
-                    }
-                    if (timings.contains("predicted_n")) {
-                        telemetry.output_tokens = timings["predicted_n"].get<int>();
-                    }
-                    if (timings.contains("prompt_ms")) {
-                        telemetry.time_to_first_token = timings["prompt_ms"].get<double>() / 1000.0;
-                    }
-                    if (timings.contains("predicted_per_second")) {
-                        telemetry.tokens_per_second = timings["predicted_per_second"].get<double>();
-                    }
-                }
+                extract_telemetry_from_chunk(chunk, telemetry);
             } catch (...) {}
         }
     };
@@ -289,56 +297,7 @@ StreamingProxy::TelemetryData StreamingProxy::parse_telemetry(const std::string&
     // Extract telemetry from the last chunk with usage data
     if (!last_chunk_with_usage.empty()) {
         try {
-            nlohmann::json usage;
-            if (last_chunk_with_usage.contains("usage")) {
-                usage = last_chunk_with_usage["usage"];
-            } else if (last_chunk_with_usage.contains("response") && last_chunk_with_usage["response"].is_object() && last_chunk_with_usage["response"].contains("usage")) {
-                usage = last_chunk_with_usage["response"]["usage"];
-            }
-
-            if (!usage.is_null()) {
-                if (usage.contains("prompt_tokens")) {
-                    telemetry.input_tokens = usage["prompt_tokens"].get<int>();
-                } else if (usage.contains("input_tokens")) {
-                    telemetry.input_tokens = usage["input_tokens"].get<int>();
-                }
-                if (usage.contains("completion_tokens")) {
-                    telemetry.output_tokens = usage["completion_tokens"].get<int>();
-                } else if (usage.contains("output_tokens")) {
-                    telemetry.output_tokens = usage["output_tokens"].get<int>();
-                }
-
-                // FLM format
-                if (usage.contains("prefill_duration_ttft")) {
-                    telemetry.time_to_first_token = usage["prefill_duration_ttft"].get<double>();
-                }
-                if (usage.contains("decoding_speed_tps")) {
-                    telemetry.tokens_per_second = usage["decoding_speed_tps"].get<double>();
-                }
-            }
-
-            // Alternative format (timings)
-            nlohmann::json timings;
-            if (last_chunk_with_usage.contains("timings")) {
-                timings = last_chunk_with_usage["timings"];
-            } else if (last_chunk_with_usage.contains("response") && last_chunk_with_usage["response"].is_object() && last_chunk_with_usage["response"].contains("timings")) {
-                timings = last_chunk_with_usage["response"]["timings"];
-            }
-
-            if (!timings.is_null()) {
-                if (timings.contains("prompt_n")) {
-                    telemetry.input_tokens = timings["prompt_n"].get<int>();
-                }
-                if (timings.contains("predicted_n")) {
-                    telemetry.output_tokens = timings["predicted_n"].get<int>();
-                }
-                if (timings.contains("prompt_ms")) {
-                    telemetry.time_to_first_token = timings["prompt_ms"].get<double>() / 1000.0;
-                }
-                if (timings.contains("predicted_per_second")) {
-                    telemetry.tokens_per_second = timings["predicted_per_second"].get<double>();
-                }
-            }
+            extract_telemetry_from_chunk(last_chunk_with_usage, telemetry);
         } catch (const std::exception& e) {
             LOG(ERROR, "StreamingProxy") << "Error parsing telemetry: " << e.what() << std::endl;
         }
