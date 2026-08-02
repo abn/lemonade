@@ -97,6 +97,18 @@ Values set in the user's `config.json` always take precedence over these seeded 
   "ryzenai": {
     "server_bin": "builtin"
   },
+  "sandbox": {
+    "allow_gpu_devices": true,
+    "allowed_network_hosts": [],
+    "allowed_read_paths": [],
+    "allowed_write_paths": [],
+    "block_outbound_network": true,
+    "enabled": "auto",
+    "engine": "nono",
+    "max_memory_mb": 0,
+    "nono_path": "auto",
+    "sandbox_external_only": false
+  },
   "sdcpp": {
     "args": "",
     "backend": "auto",
@@ -242,6 +254,16 @@ Backend-specific settings are nested under their backend name:
 | `base_url` | OpenAI-compatible base URL ending in `/v1` (or equivalent). |
 
 API keys for these providers are **not** stored in `config.json` — they live in `LEMONADE_<PROVIDER>_API_KEY` env vars (persistent) or `lemond` process memory via `POST /v1/cloud/auth` (ephemeral). Manage providers with `lemonade cloud install/uninstall/auth/list` rather than editing this section by hand.
+
+**sandbox** — Kernel-enforced nono sandboxing for backend processes:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | string/bool | `"auto"` | Sandboxing mode: `"auto"`, `true` / `"enabled"`, or `false` / `"disabled"` |
+| `engine` | string | `"nono"` | Sandboxing engine (currently `"nono"`) |
+| `block_outbound_network` | bool | `true` | Restrict outbound network access (loopback IPC port binding allowed) |
+| `allow_gpu_devices` | bool | `true` | Pass through GPU/NPU device nodes (`/dev/dri/*`, `/dev/kfd`, `/dev/nvidia*`, `/dev/accel/amdxdna*`) |
+| `nono_executable` | string | `"auto"` | Path to nono executable or `"auto"` to discover/auto-download |
 
 **telemetry** — Unified telemetry and tracing configurations:
 
