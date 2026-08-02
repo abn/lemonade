@@ -2096,20 +2096,35 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_custom_backends.cpp"
     )
     if(EXISTS "${_CUSTOM_BACKENDS_TEST_SRC}")
+        set(_CUSTOM_BACKENDS_PLATFORM_SRC
+            src/cpp/server/utils/platform/path_linux.cpp
+            src/cpp/server/utils/platform/process_linux.cpp
+        )
+        if(WIN32)
+            set(_CUSTOM_BACKENDS_PLATFORM_SRC
+                src/cpp/server/utils/platform/path_windows.cpp
+                src/cpp/server/utils/platform/process_windows.cpp
+            )
+        elseif(APPLE)
+            set(_CUSTOM_BACKENDS_PLATFORM_SRC
+                src/cpp/server/utils/platform/path_macos.cpp
+                src/cpp/server/utils/platform/process_macos.cpp
+            )
+        endif()
+
         add_executable(test_custom_backends
             test/cpp/test_custom_backends.cpp
             src/cpp/server/backends/backend_descriptor_registry.cpp
             src/cpp/server/utils/process_manager.cpp
-            src/cpp/server/utils/platform/process_linux.cpp
             src/cpp/server/utils/path_utils.cpp
-            src/cpp/server/utils/platform/path_linux.cpp
+            ${_CUSTOM_BACKENDS_PLATFORM_SRC}
         )
         target_include_directories(test_custom_backends PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
             ${CMAKE_CURRENT_BINARY_DIR}/include
         )
         find_package(Threads REQUIRED)
-        target_link_libraries(test_custom_backends PRIVATE Threads::Threads)
+        target_link_libraries(test_custom_backends PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
         add_test(NAME CustomBackendsTest COMMAND test_custom_backends)
         register_cpp_ci_test(CustomBackendsTest test_custom_backends)
     endif()
