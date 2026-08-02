@@ -818,6 +818,7 @@ set(SOURCES_CORE
     src/cpp/server/cli_parser.cpp
     src/cpp/server/cloud_provider_registry.cpp
     src/cpp/server/config_file.cpp
+    src/cpp/server/utils/sandbox/nono_sandbox.cpp
     src/cpp/server/directory_watcher.cpp
     src/cpp/server/model_manager.cpp
     src/cpp/server/model_registry.cpp
