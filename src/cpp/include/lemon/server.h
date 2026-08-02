@@ -135,10 +135,6 @@ private:
     void handle_pull(const httplib::Request& req, httplib::Response& res);
     void handle_registry_search(const httplib::Request& req, httplib::Response& res);
     void handle_pull_variants(const httplib::Request& req, httplib::Response& res);
-    // Runs the routing policy engine against an ad-hoc (unregistered) policy
-    // document + prompt, for the Router Builder's Test Prompt tab. Unlike
-    // route_collection_request, the policy isn't attached to a registered
-    // model, so it's parsed fresh from the request body each call.
     void handle_routing_validate(const httplib::Request& req, httplib::Response& res);
     void handle_load(const httplib::Request& req, httplib::Response& res);
     void handle_unload(const httplib::Request& req, httplib::Response& res);
@@ -163,6 +159,7 @@ private:
     void handle_stats(const httplib::Request& req, httplib::Response& res);
     void handle_system_info(const httplib::Request& req, httplib::Response& res);
     void handle_system_stats(const httplib::Request& req, httplib::Response& res);
+    void handle_system_sandbox(const httplib::Request& req, httplib::Response& res);
     void handle_log_level(const httplib::Request& req, httplib::Response& res);
     void handle_shutdown(const httplib::Request& req, httplib::Response& res);
     void handle_simulate_vram_pressure(const httplib::Request& req, httplib::Response& res);

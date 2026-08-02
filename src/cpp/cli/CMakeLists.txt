@@ -27,7 +27,9 @@ set(COMMON_SOURCES
     bench_sysinfo.cpp
     chat_repl.cpp
     ../server/recipe_options.cpp
+    ../server/config_file.cpp
     ../server/utils/process_manager.cpp
+    ../server/utils/sandbox/nono_sandbox.cpp
     ../server/utils/path_utils.cpp
     ../server/utils/url_utils.cpp
     ../server/utils/json_utils.cpp

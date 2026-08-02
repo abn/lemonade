@@ -5,6 +5,7 @@
 #include <functional>
 
 namespace lemon {
+struct SandboxPolicy;
 namespace utils {
 
 struct ProcessHandle {
@@ -23,7 +24,15 @@ public:
         const std::string& working_dir = "",
         bool inherit_output = false,
         bool filter_health_logs = false,
-        const std::vector<std::pair<std::string, std::string>>& env_vars = {});
+        const std::vector<std::pair<std::string, std::string>>& env_vars = {},
+        const SandboxPolicy* sandbox_policy = nullptr,
+        int port = 0,
+        const std::string& cache_dir = "",
+        const std::string& models_dir = "",
+        const std::string& extra_models_dir = "",
+        const std::string& custom_command_dir = "",
+        bool is_container_backend = false,
+        bool is_npu_recipe = false);
 
     // Blocks until process exits or callback returns false (which kills the process)
     // Returns exit code, or -1 if killed by callback

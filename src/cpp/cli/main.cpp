@@ -168,6 +168,8 @@ struct CliConfig {
     std::string recipe_file;
     bool skip_prompt = false;
     bool yes = false;
+    bool sandbox_enabled = false;
+    std::string sandbox_nono_path;
     int scan_duration = 30;
     bool json_output = false;
     bool codex_use_user_config = false;
@@ -1230,6 +1232,11 @@ int main(int argc, char* argv[]) {
         ->default_val(config.api_key)
         ->type_name("KEY")
         ->envname("LEMONADE_API_KEY");
+    app.add_flag("--sandbox,!--no-sandbox", config.sandbox_enabled, "Enable or disable kernel-enforced nono sandboxing for backend processes")
+        ->envname("LEMONADE_SANDBOX_ENABLED");
+    app.add_option("--sandbox-nono-path", config.sandbox_nono_path, "Path to nono binary executable")
+        ->type_name("PATH")
+        ->envname("LEMONADE_SANDBOX_NONO_PATH");
 
     // Subcommands
     // Quick start commands

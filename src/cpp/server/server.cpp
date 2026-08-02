@@ -20,6 +20,7 @@
 #include "lemon/utils/image_sniff.h"
 #include "lemon/utils/json_utils.h"
 #include "lemon/utils/path_utils.h"
+#include "lemon/utils/sandbox/nono_sandbox.h"
 #include "lemon/streaming_proxy.h"
 #include "lemon/logging_config.h"
 #include "lemon/thinking_controls.h"
@@ -1242,6 +1243,14 @@ void Server::setup_routes(httplib::Server &web_server) {
 
     register_get("system-stats", [this](const httplib::Request& req, httplib::Response& res) {
         handle_system_stats(req, res);
+    });
+
+    register_get("system-sandbox", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_system_sandbox(req, res);
+    });
+
+    register_get("system/sandbox", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_system_sandbox(req, res);
     });
 
     register_post("log-level", [this](const httplib::Request& req, httplib::Response& res) {
@@ -5984,6 +5993,31 @@ void Server::handle_system_stats(const httplib::Request& req, httplib::Response&
     stats["npu_percent"] = (npu_percent >= 0) ? nlohmann::json(npu_percent) : nlohmann::json();
 
     res.set_content(stats.dump(), "application/json");
+}
+
+void Server::handle_system_sandbox(const httplib::Request& req, httplib::Response& res) {
+    if (req.method == "HEAD") {
+        res.status = 200;
+        return;
+    }
+
+    json current_config = ConfigFile::load(cache_dir_);
+    SandboxPolicy policy = ConfigFile::get_sandbox_policy(current_config);
+
+    std::string nono_bin;
+    bool available = utils::sandbox::NonoSandbox::is_nono_available(cache_dir_, nono_bin);
+    bool active = (policy.enabled == SandboxMode::Enabled) ||
+                  (policy.enabled == SandboxMode::Auto && available);
+
+    nlohmann::json response = {
+        {"active", active},
+        {"available", available},
+        {"nono_path", nono_bin},
+        {"policy", policy.to_json()}
+    };
+
+    res.status = 200;
+    res.set_content(response.dump(2), "application/json");
 }
 
 void Server::handle_log_level(const httplib::Request& req, httplib::Response& res) {

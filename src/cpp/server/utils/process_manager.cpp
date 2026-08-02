@@ -1,5 +1,9 @@
 #include <lemon/utils/process_manager.h>
 #include <lemon/utils/process_platform.h>
+#include <lemon/utils/sandbox/nono_sandbox.h>
+#include <lemon/utils/path_utils.h>
+#include <lemon/utils/aixlog.hpp>
+#include <lemon/config_file.h>
 
 namespace lemon {
 namespace utils {
@@ -10,9 +14,50 @@ ProcessHandle ProcessManager::start_process(
     const std::string& working_dir,
     bool inherit_output,
     bool filter_health_logs,
-    const std::vector<std::pair<std::string, std::string>>& env_vars) {
+    const std::vector<std::pair<std::string, std::string>>& env_vars,
+    const SandboxPolicy* sandbox_policy,
+    int port,
+    const std::string& cache_dir,
+    const std::string& models_dir,
+    const std::string& extra_models_dir,
+    const std::string& custom_command_dir,
+    bool is_container_backend,
+    bool is_npu_recipe) {
 
     auto platform = create_process_platform();
+
+    SandboxPolicy auto_policy;
+    const SandboxPolicy* policy_to_use = sandbox_policy;
+    if (!policy_to_use) {
+        std::string effective_cache = cache_dir.empty() ? get_cache_dir() : cache_dir;
+        json cfg = ConfigFile::load(effective_cache);
+        auto_policy = ConfigFile::get_sandbox_policy(cfg);
+        policy_to_use = &auto_policy;
+    }
+
+    if (policy_to_use && policy_to_use->enabled != SandboxMode::Disabled) {
+        auto spec = sandbox::NonoSandbox::build_nono_command(
+            *policy_to_use,
+            executable,
+            args,
+            port,
+            cache_dir,
+            models_dir,
+            extra_models_dir,
+            custom_command_dir,
+            is_container_backend,
+            is_npu_recipe);
+
+        if (spec.is_sandboxed) {
+            LOG(INFO) << "[SANDBOX] Engaged nono sandboxing for backend: " << executable
+                      << " (status: " << spec.sandbox_status << ")" << std::endl;
+            return platform->spawn(spec.nono_executable, spec.nono_args, working_dir, inherit_output, filter_health_logs, env_vars);
+        } else {
+            LOG(INFO) << "[SANDBOX] Backend process launch unwrapped: " << executable
+                      << " (reason: " << spec.sandbox_status << ")" << std::endl;
+        }
+    }
+
     return platform->spawn(executable, args, working_dir, inherit_output, filter_health_logs, env_vars);
 }
 

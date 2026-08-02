@@ -208,6 +208,7 @@ pid_t LinuxProcessPlatform::spawn_process(
 
     if (pid == 0) {
         // Child process — zero heap allocations here!
+        setpgid(0, 0); // Put process and all sandboxed children into dedicated process group
         prctl(PR_SET_PDEATHSIG, SIGTERM);
 
         if (!working_dir.empty()) {
@@ -252,6 +253,7 @@ pid_t LinuxProcessPlatform::spawn_process(
         _exit(1);
     }
 
+    setpgid(pid, pid);
     return pid;
 }
 
@@ -381,6 +383,8 @@ void LinuxProcessPlatform::terminate(ProcessHandle handle) {
 #endif
 
     errno = 0;
+    // Send SIGTERM to process group (-pid) so wrapper and all sandboxed child processes exit
+    ::kill(-handle.pid, SIGTERM);
     if (::kill(handle.pid, SIGTERM) != 0 && errno == ESRCH) {
         LOG(INFO, "ProcessManager") << "Process PID " << handle.pid
                                     << " was already gone before SIGTERM" << std::endl;
@@ -405,6 +409,7 @@ void LinuxProcessPlatform::terminate(ProcessHandle handle) {
     if (!exited_gracefully) {
         LOG(WARNING, "ProcessManager") << "Process did not respond to SIGTERM, using SIGKILL" << std::endl;
         errno = 0;
+        ::kill(-handle.pid, SIGKILL);
         if (::kill(handle.pid, SIGKILL) == 0 || errno != ESRCH) {
             waitpid(handle.pid, &status, 0);
         }

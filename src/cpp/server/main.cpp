@@ -107,6 +107,11 @@ int main(int argc, char** argv) {
         utils::set_models_dir(config->models_dir());
 
         LOG(INFO) << "Starting Lemonade Server..." << std::endl;
+#ifndef _WIN32
+        if (getuid() == 0 || geteuid() == 0) {
+            LOG(WARNING) << "[SECURITY WARNING] lemond is running as root (UID 0). Running untrusted backend inference processes as root presents a high security risk." << std::endl;
+        }
+#endif
         LOG(INFO) << "  Version: " << LEMON_VERSION_STRING << std::endl;
         LOG(INFO) << "  Cache dir: " << cli_config.cache_dir << std::endl;
         LOG(INFO) << "  Port: " << config->port() << std::endl;
