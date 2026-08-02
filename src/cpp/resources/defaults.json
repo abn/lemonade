@@ -62,6 +62,18 @@
   "ryzenai": {
     "server_bin": "builtin"
   },
+  "sandbox": {
+    "allow_gpu_devices": true,
+    "allowed_network_hosts": [],
+    "allowed_read_paths": [],
+    "allowed_write_paths": [],
+    "block_outbound_network": true,
+    "enabled": "auto",
+    "engine": "nono",
+    "max_memory_mb": 0,
+    "nono_path": "auto",
+    "sandbox_external_only": false
+  },
   "sdcpp": {
     "args": "",
     "backend": "auto",

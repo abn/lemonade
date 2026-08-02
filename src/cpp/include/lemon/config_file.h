@@ -77,6 +77,32 @@ static inline bool config_migrate(json& config,
 }
 
 // ============================================================================
+// Sandbox policy configuration
+// ============================================================================
+
+enum class SandboxMode {
+    Auto,
+    Enabled,
+    Disabled
+};
+
+struct SandboxPolicy {
+    SandboxMode enabled = SandboxMode::Auto;
+    std::string engine = "nono";
+    std::string nono_path = "auto";
+    bool block_outbound_network = true;
+    std::vector<std::string> allowed_network_hosts;
+    bool allow_gpu_devices = true;
+    bool sandbox_external_only = false;
+    int max_memory_mb = 0;
+    std::vector<std::string> allowed_read_paths;
+    std::vector<std::string> allowed_write_paths;
+
+    static SandboxPolicy from_json(const json& config);
+    json to_json() const;
+};
+
+// ============================================================================
 
 /// Manages reading and writing config.json in the lemonade cache dir.
 class ConfigFile {
@@ -99,6 +125,10 @@ public:
     /// Save config to <cache_dir>/config.json atomically (write temp, rename).
     /// Thread-safe.
     static void save(const std::string& cache_dir, const json& config);
+
+    /// Extract resolved SandboxPolicy from merged config JSON, taking into account
+    /// 12-Factor environment variable overrides (LEMONADE_SANDBOX_*).
+    static SandboxPolicy get_sandbox_policy(const json& config);
 
 private:
     static std::shared_mutex file_mutex_;

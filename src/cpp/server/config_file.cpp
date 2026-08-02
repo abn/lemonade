@@ -183,5 +183,123 @@ void ConfigFile::save(const std::string& cache_dir, const json& config) {
     }
 }
 
+SandboxPolicy SandboxPolicy::from_json(const json& config) {
+    SandboxPolicy policy;
+    const json* s = nullptr;
+
+    if (config.contains("sandbox") && config["sandbox"].is_object()) {
+        s = &config["sandbox"];
+    } else if (config.is_object() && (config.contains("enabled") || config.contains("engine"))) {
+        s = &config;
+    }
+
+    if (!s) {
+        return policy;
+    }
+
+    if (s->contains("enabled")) {
+        const auto& val = (*s)["enabled"];
+        if (val.is_boolean()) {
+            policy.enabled = val.get<bool>() ? SandboxMode::Enabled : SandboxMode::Disabled;
+        } else if (val.is_string()) {
+            std::string str = val.get<std::string>();
+            if (str == "auto") {
+                policy.enabled = SandboxMode::Auto;
+            } else if (str == "true" || str == "1" || str == "enabled") {
+                policy.enabled = SandboxMode::Enabled;
+            } else if (str == "false" || str == "0" || str == "disabled") {
+                policy.enabled = SandboxMode::Disabled;
+            }
+        }
+    }
+
+    if (s->contains("engine") && (*s)["engine"].is_string()) {
+        policy.engine = (*s)["engine"].get<std::string>();
+    }
+    if (s->contains("nono_path") && (*s)["nono_path"].is_string()) {
+        policy.nono_path = (*s)["nono_path"].get<std::string>();
+    }
+    if (s->contains("block_outbound_network") && (*s)["block_outbound_network"].is_boolean()) {
+        policy.block_outbound_network = (*s)["block_outbound_network"].get<bool>();
+    }
+    if (s->contains("allow_gpu_devices") && (*s)["allow_gpu_devices"].is_boolean()) {
+        policy.allow_gpu_devices = (*s)["allow_gpu_devices"].get<bool>();
+    }
+    if (s->contains("sandbox_external_only") && (*s)["sandbox_external_only"].is_boolean()) {
+        policy.sandbox_external_only = (*s)["sandbox_external_only"].get<bool>();
+    }
+    if (s->contains("max_memory_mb") && (*s)["max_memory_mb"].is_number_integer()) {
+        policy.max_memory_mb = (*s)["max_memory_mb"].get<int>();
+    }
+
+    auto parse_string_list = [](const json& parent, const std::string& key, std::vector<std::string>& dest) {
+        if (parent.contains(key) && parent[key].is_array()) {
+            dest.clear();
+            for (const auto& item : parent[key]) {
+                if (item.is_string()) {
+                    dest.push_back(item.get<std::string>());
+                }
+            }
+        }
+    };
+
+    parse_string_list(*s, "allowed_network_hosts", policy.allowed_network_hosts);
+    parse_string_list(*s, "allowed_read_paths", policy.allowed_read_paths);
+    parse_string_list(*s, "allowed_write_paths", policy.allowed_write_paths);
+
+    return policy;
+}
+
+json SandboxPolicy::to_json() const {
+    std::string enabled_str = "auto";
+    if (enabled == SandboxMode::Enabled) {
+        enabled_str = "true";
+    } else if (enabled == SandboxMode::Disabled) {
+        enabled_str = "false";
+    }
+
+    return {
+        {"enabled", enabled_str},
+        {"engine", engine},
+        {"nono_path", nono_path},
+        {"block_outbound_network", block_outbound_network},
+        {"allowed_network_hosts", allowed_network_hosts},
+        {"allow_gpu_devices", allow_gpu_devices},
+        {"sandbox_external_only", sandbox_external_only},
+        {"max_memory_mb", max_memory_mb},
+        {"allowed_read_paths", allowed_read_paths},
+        {"allowed_write_paths", allowed_write_paths}
+    };
+}
+
+SandboxPolicy ConfigFile::get_sandbox_policy(const json& config) {
+    SandboxPolicy policy = SandboxPolicy::from_json(config);
+
+    // 12-Factor Environment Variable Overrides
+    if (const char* env = std::getenv("LEMONADE_SANDBOX_ENABLED"); env && *env) {
+        std::string str(env);
+        if (str == "auto") {
+            policy.enabled = SandboxMode::Auto;
+        } else if (str == "true" || str == "1" || str == "enabled") {
+            policy.enabled = SandboxMode::Enabled;
+        } else if (str == "false" || str == "0" || str == "disabled") {
+            policy.enabled = SandboxMode::Disabled;
+        }
+    }
+    if (const char* env = std::getenv("LEMONADE_SANDBOX_NONO_PATH"); env && *env) {
+        policy.nono_path = std::string(env);
+    }
+    if (const char* env = std::getenv("LEMONADE_SANDBOX_ALLOW_GPU"); env && *env) {
+        std::string str(env);
+        policy.allow_gpu_devices = (str == "1" || str == "true" || str == "TRUE");
+    }
+    if (const char* env = std::getenv("LEMONADE_SANDBOX_BLOCK_OUTBOUND"); env && *env) {
+        std::string str(env);
+        policy.block_outbound_network = (str == "1" || str == "true" || str == "TRUE");
+    }
+
+    return policy;
+}
+
 
 } // namespace lemon
