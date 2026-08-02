@@ -59,6 +59,7 @@ runs:
           LEMON_RUNTIME_DIR="${XDG_RUNTIME_DIR:+${XDG_RUNTIME_DIR}/lemonade}"
           for candidate in \
             "${LEMON_RUNTIME_DIR}/lemonade-server.log" \
+            "${HOME}/.cache/lemonade/logs"/*.log \
             "$RUNNER_TEMP/lemonade-server.log" \
             "$RUNNER_TEMP/lemond.log"; do
             if [ -f "$candidate" ]; then
