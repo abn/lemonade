@@ -87,6 +87,7 @@
     "hide_thinking": false,
     "max_attribute_length": 0,
     "max_queue_capacity": 1000,
+    "max_queue_bytes": 134217728,
     "otlp": {
       "batch_timeout_s": 1.0,
       "endpoint": "http://localhost:4318/v1/traces",

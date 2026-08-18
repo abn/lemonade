@@ -457,6 +457,7 @@ private:
     };
 
     static constexpr size_t MAX_CAPACITY = 1000;
+    static constexpr size_t MAX_BATCH_BYTES = 2097152;
     std::deque<Task> queue_;
     size_t current_bytes_ = 0;
     std::mutex mutex_;
@@ -470,14 +471,14 @@ private:
     bool flush_requested_ = false;
     std::condition_variable cv_flush_;
 
-    void remove_task_at(std::deque<Task>::iterator it, std::vector<nlohmann::json>& batch_spans) {
+    std::deque<Task>::iterator remove_task_at(std::deque<Task>::iterator it, std::vector<nlohmann::json>& batch_spans) {
         batch_spans.push_back(std::move(it->span_details));
         if (current_bytes_ >= it->approx_bytes) {
             current_bytes_ -= it->approx_bytes;
         } else {
             current_bytes_ = 0;
         }
-        queue_.erase(it);
+        return queue_.erase(it);
     }
 
     void pop_front_task() {
@@ -515,12 +516,17 @@ private:
                         batch_headers = oldest_task.headers;
                         batch_protocol = oldest_task.protocol;
 
+                        size_t accumulated_batch_bytes = 0;
                         auto it = queue_.begin();
                         while (it != queue_.end()) {
                             if (it->endpoint == batch_endpoint &&
                                 it->headers == batch_headers &&
                                 it->protocol == batch_protocol) {
-                                remove_task_at(it, batch_spans);
+                                if (!batch_spans.empty() && accumulated_batch_bytes + it->approx_bytes > MAX_BATCH_BYTES) {
+                                    break;
+                                }
+                                accumulated_batch_bytes += it->approx_bytes;
+                                it = remove_task_at(it, batch_spans);
                             } else {
                                 ++it;
                             }
@@ -543,12 +549,17 @@ private:
                             batch_size = config->telemetry_otlp_send_batch_size();
                         }
 
+                        size_t accumulated_batch_bytes = 0;
                         auto it = queue_.begin();
                         while (it != queue_.end() && static_cast<int>(batch_spans.size()) < batch_size) {
                             if (it->endpoint == batch_endpoint &&
                                 it->headers == batch_headers &&
                                 it->protocol == batch_protocol) {
-                                remove_task_at(it, batch_spans);
+                                if (!batch_spans.empty() && accumulated_batch_bytes + it->approx_bytes > MAX_BATCH_BYTES) {
+                                    break;
+                                }
+                                accumulated_batch_bytes += it->approx_bytes;
+                                it = remove_task_at(it, batch_spans);
                             } else {
                                 ++it;
                             }
@@ -568,7 +579,6 @@ private:
                     std::string target_protocol = oldest_task.protocol;
                     auto oldest_arrival = oldest_task.arrival_time;
 
-                    static constexpr size_t MAX_BATCH_BYTES = 2097152; // 2MB max payload per OTLP POST batch
                     int batch_size = 100;
                     double timeout_s = 1.0;
                     if (auto* config = RuntimeConfig::global()) {
@@ -605,7 +615,7 @@ private:
                                     break;
                                 }
                                 accumulated_batch_bytes += it->approx_bytes;
-                                remove_task_at(it, batch_spans);
+                                it = remove_task_at(it, batch_spans);
                             } else {
                                 ++it;
                             }
@@ -796,7 +806,14 @@ public:
             max_queue_bytes = config->telemetry_max_queue_bytes();
         }
 
-        size_t max_bytes = static_cast<size_t>(std::min<int64_t>(max_queue_bytes, std::numeric_limits<size_t>::max()));
+        size_t max_bytes = 0;
+        if (max_queue_bytes > 0) {
+            if (static_cast<uint64_t>(max_queue_bytes) > std::numeric_limits<size_t>::max()) {
+                max_bytes = std::numeric_limits<size_t>::max();
+            } else {
+                max_bytes = static_cast<size_t>(max_queue_bytes);
+            }
+        }
 
         if (max_bytes > 0 && task_bytes > max_bytes) {
             dropped_spans_count_++;
@@ -937,7 +954,7 @@ InferenceSpan::InferenceSpan(const std::string& span_kind, const std::string& na
         }
     } else if (span_kind_ == "CLASSIFIER") {
         // Classifier inputs are the payloads being screened (PII, phishing,
-        // prompt injection) — never capture the raw text, only length + a
+        // prompt injection), so never capture the raw text, only length and a
         // salted hash for correlating repeated inputs.
         std::string text;
         if (request_json.contains("text") && request_json["text"].is_string()) {
