@@ -1,4 +1,4 @@
-// Windows header discipline — must precede all other includes.
+// Windows header discipline: must precede all other includes.
 // Mirrors the setup that was previously in process_manager.cpp before
 // the platform files were made self-contained.
 #ifdef _WIN32
@@ -19,6 +19,7 @@
 
 #include <lemon/utils/process_platform.h>
 #include <lemon/utils/aixlog.hpp>
+#include <lemon/sandbox/env_scrubber.h>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -28,7 +29,6 @@
 namespace lemon {
 namespace utils {
 
-// Helper function: escape Windows command-line arguments
 static std::string escape_windows_arg(const std::string& arg) {
     std::string result = "\"";
     for (size_t i = 0; i < arg.size(); ++i) {
@@ -180,7 +180,8 @@ public:
         const std::string& working_dir,
         bool inherit_output,
         bool filter_health_logs,
-        const std::vector<std::pair<std::string, std::string>>& env_vars) override {
+        const std::vector<std::pair<std::string, std::string>>& env_vars,
+        const std::optional<lemon::sandbox::SandboxPolicy>& sandbox_policy = std::nullopt) override {
 
         ProcessHandle handle;
         handle.handle = nullptr;
@@ -280,9 +281,26 @@ public:
             }
         }
 
+        // Sanitize environment (combining env_vars with sandbox_policy and stripping ambient secrets)
+        std::vector<std::pair<std::string, std::string>> combined_env = env_vars;
+        std::vector<std::string> extra_allowlist;
+        if (sandbox_policy.has_value()) {
+            for (const auto& kv : sandbox_policy->explicit_env_vars) {
+                combined_env.push_back(kv);
+            }
+            extra_allowlist = sandbox_policy->allowed_env_vars;
+        }
+        auto sanitized_env = lemon::sandbox::EnvScrubber::sanitize_environment(
+            combined_env, extra_allowlist, true);
+
         std::vector<char> environment_block;
-        if (!env_vars.empty()) {
-            environment_block = build_windows_environment_block(env_vars);
+        for (const auto& entry : sanitized_env) {
+            std::string line = entry.first + "=" + entry.second;
+            environment_block.insert(environment_block.end(), line.begin(), line.end());
+            environment_block.push_back('\0');
+        }
+        if (!environment_block.empty()) {
+            environment_block.push_back('\0');
         }
 
         BOOL success = CreateProcessA(

@@ -99,6 +99,7 @@ Values set in the user's `config.json` always take precedence over these seeded 
   "ryzenai": {
     "server_bin": "builtin"
   },
+  "sandbox": "auto",
   "sdcpp": {
     "args": "",
     "backend": "auto",

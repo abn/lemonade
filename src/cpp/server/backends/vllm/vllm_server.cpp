@@ -501,7 +501,20 @@ void VLLMServer::load(const std::string& model_name,
     env_vars.push_back({"PYTHONNOUSERSITE", "1"});
 
     bool inherit_output = (log_level_ == "info") || is_debug();
-    set_process_handle(ProcessManager::start_process(executable, args, "", inherit_output, true, env_vars));
+    lemon::sandbox::SandboxPolicy sandbox_policy = build_sandbox_policy(
+        executable, model_target, get_backend_port(), "rocm");
+    if (!rocm_shim_dir_.empty()) {
+        sandbox_policy.add_read_path(rocm_shim_dir_);
+    }
+    sandbox_policy.add_write_path("/tmp");
+    sandbox_policy.allow_env_var("PYTHONPATH");
+    sandbox_policy.allow_env_var("PYTHONHOME");
+    sandbox_policy.allow_env_var("VIRTUAL_ENV");
+    sandbox_policy.allow_env_var("VLLM_USAGE_SOURCE");
+    sandbox_policy.allow_env_var("FLASH_ATTENTION_TRITON_AMD_ENABLE");
+    sandbox_policy.allow_env_var("PYTHONNOUSERSITE");
+    set_process_handle(ProcessManager::start_process(
+        executable, args, "", inherit_output, true, env_vars, sandbox_policy));
 
     // vLLM can take longer to start (loading model, compiling kernels)
     if (!wait_for_ready("/health", HttpClient::get_default_timeout())) {

@@ -384,13 +384,24 @@ void SDServer::load(const std::string& model_name,
     working_dir = path_to_utf8(executable_path.parent_path());
 #endif
 
+    lemon::sandbox::SandboxPolicy sandbox_policy = build_sandbox_policy(
+        process_exe_path, model_path, port_, resolved_backend);
+    if (!llm_path.empty()) {
+        sandbox_policy.add_read_path(llm_path);
+    }
+    if (!vae_path.empty()) {
+        sandbox_policy.add_read_path(vae_path);
+    }
+    sandbox_policy.add_write_path("/tmp");
+
     ProcessHandle started_handle = utils::ProcessManager::start_process(
         process_exe_path,
         args,
         working_dir,
         is_debug(),  // inherit_output
         false,  // filter_health_logs
-        env_vars
+        env_vars,
+        sandbox_policy
     );
     set_process_handle(started_handle);
 

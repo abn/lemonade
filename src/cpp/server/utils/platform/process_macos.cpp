@@ -1,5 +1,6 @@
 #include <lemon/utils/process_platform.h>
 #include <lemon/utils/aixlog.hpp>
+#include <lemon/sandbox/env_scrubber.h>
 
 #include <stdexcept>
 
@@ -59,7 +60,8 @@ public:
         const std::string& working_dir,
         bool inherit_output,
         bool filter_health_logs,
-        const std::vector<std::pair<std::string, std::string>>& env_vars) override;
+        const std::vector<std::pair<std::string, std::string>>& env_vars,
+        const std::optional<lemon::sandbox::SandboxPolicy>& sandbox_policy = std::nullopt) override;
 
     void terminate(ProcessHandle handle) override;
     bool is_running(ProcessHandle handle) override;
@@ -87,7 +89,8 @@ ProcessHandle MacOSProcessPlatform::spawn(
     const std::string& working_dir,
     bool inherit_output,
     bool filter_health_logs,
-    const std::vector<std::pair<std::string, std::string>>& env_vars) {
+    const std::vector<std::pair<std::string, std::string>>& env_vars,
+    const std::optional<lemon::sandbox::SandboxPolicy>& sandbox_policy) {
 
     ProcessHandle handle;
     handle.handle = nullptr;
@@ -119,8 +122,8 @@ ProcessHandle MacOSProcessPlatform::spawn(
     // Problem: lemond spawns llama-server via fork()+execvp(). On macOS, fork()
     // leaves the child with corrupted Mach-port and XPC-bootstrap state that
     // execvp() does not reset. llama.cpp b8884+ now runs a ggml-metal probe at
-    // startup that calls [MTLDevice newLibraryWithSource:] — which routes
-    // through MTLCompilerService XPC — and dies on the broken channel before
+    // startup that calls [MTLDevice newLibraryWithSource:], which routes
+    // through MTLCompilerService XPC, and dies on the broken channel before
     // the model is opened. Direct terminal runs work; only lemond-spawned
     // children fail (~130ms, exit code -1).
     //
@@ -157,22 +160,22 @@ ProcessHandle MacOSProcessPlatform::spawn(
     posix_spawnattr_setsigdefault(&attr, &default_signals);
     posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF);
 
-    // Build envp
-    std::vector<std::string> env_strings;
-    for (char** e = environ; e && *e; ++e) {
-        bool override_existing = false;
-        for (const auto& env_pair : env_vars) {
-            std::string prefix = env_pair.first + "=";
-            if (std::strncmp(*e, prefix.c_str(), prefix.size()) == 0) {
-                override_existing = true;
-                break;
-            }
+    // Sanitize environment (combining env_vars with sandbox_policy and stripping ambient secrets)
+    std::vector<std::pair<std::string, std::string>> combined_env = env_vars;
+    std::vector<std::string> extra_allowlist;
+    if (sandbox_policy.has_value()) {
+        for (const auto& kv : sandbox_policy->explicit_env_vars) {
+            combined_env.push_back(kv);
         }
-        if (!override_existing) {
-            env_strings.emplace_back(*e);
-        }
+        extra_allowlist = sandbox_policy->allowed_env_vars;
     }
-    for (const auto& env_pair : env_vars) {
+    auto sanitized_env = lemon::sandbox::EnvScrubber::sanitize_environment(
+        combined_env, extra_allowlist, true);
+
+    // Build envp from sanitized environment
+    std::vector<std::string> env_strings;
+    env_strings.reserve(sanitized_env.size());
+    for (const auto& env_pair : sanitized_env) {
         env_strings.emplace_back(env_pair.first + "=" + env_pair.second);
     }
     std::vector<char*> envp;

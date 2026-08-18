@@ -401,6 +401,22 @@ bool RuntimeConfig::enable_dgpu_gtt() const {
     return config_["enable_dgpu_gtt"].get<bool>();
 }
 
+std::string RuntimeConfig::sandbox_mode() const {
+    if (const char* env = std::getenv("LEMONADE_SANDBOX_MODE")) {
+        if (*env != '\0') return env;
+    }
+    std::shared_lock lock(mutex_);
+    if (config_.contains("sandbox")) {
+        if (config_["sandbox"].is_string()) {
+            return config_["sandbox"].get<std::string>();
+        }
+        if (config_["sandbox"].is_boolean()) {
+            return config_["sandbox"].get<bool>() ? "auto" : "disabled";
+        }
+    }
+    return "auto";
+}
+
 std::string RuntimeConfig::default_model_source() const {
     std::shared_lock lock(mutex_);
     return config_.value("default_model_source", std::string("huggingface"));
@@ -735,6 +751,22 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
         if (method != "auto" && method != "wheel" && method != "tarball") {
             throw std::invalid_argument(
                 "'rocm_install_method' must be 'auto', 'wheel', or 'tarball'");
+        }
+    } else if (key == "sandbox") {
+        if (!value.is_boolean() && !value.is_string()) {
+            throw std::invalid_argument("'sandbox' must be a boolean or string ('auto', 'enforced', 'disabled')");
+        }
+        if (value.is_string()) {
+            std::string s = value.get<std::string>();
+            std::string lowered = s;
+            std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (lowered != "auto" && lowered != "enforced" && lowered != "strict" &&
+                lowered != "disabled" && lowered != "off" && lowered != "none" &&
+                lowered != "scrubbed_only" && lowered != "scrubbed") {
+                throw std::invalid_argument(
+                    "'sandbox' must be a boolean or one of: 'auto', 'enforced', 'disabled'");
+            }
         }
     } else if (key == "telemetry") {
         if (!value.is_object()) {

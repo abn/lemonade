@@ -1,16 +1,18 @@
-#include <lemon/wrapped_server.h>
-#include <lemon/utils/process_manager.h>
-#include <lemon/utils/http_client.h>
-#include <lemon/streaming_proxy.h>
-#include <lemon/error_types.h>
-#include <httplib.h>
 #include <algorithm>
-#include <cctype>
-#include <thread>
 #include <chrono>
-#include <iostream>
+#include <cctype>
 #include <cstdlib>
+#include <filesystem>
+#include <iostream>
+#include <thread>
+#include <httplib.h>
+#include <lemon/error_types.h>
+#include <lemon/runtime_config.h>
+#include <lemon/streaming_proxy.h>
 #include <lemon/utils/aixlog.hpp>
+#include <lemon/utils/http_client.h>
+#include <lemon/utils/process_manager.h>
+#include <lemon/wrapped_server.h>
 
 namespace lemon {
 
@@ -849,6 +851,159 @@ void WrappedServer::forward_streaming_request(const std::string& endpoint,
             // Sink might be closed, ignore
         }
     }
+}
+
+lemon::sandbox::SandboxPolicy WrappedServer::build_default_sandbox_policy(
+    const std::string& model_path,
+    const std::string& executable,
+    uint16_t port,
+    const std::string& backend_variant,
+    DeviceType device_type) {
+
+    lemon::sandbox::SandboxPolicy policy;
+    policy.bind_port = port;
+    policy.network_access = lemon::sandbox::NetworkAccess::LoopbackOnly;
+
+    // Resolve SandboxMode from RuntimeConfig or environment, defaulting to Auto
+    std::string sb_mode_str = "auto";
+    if (auto* cfg = RuntimeConfig::global()) {
+        sb_mode_str = cfg->sandbox_mode();
+    } else if (const char* mode_env = std::getenv("LEMONADE_SANDBOX_MODE")) {
+        if (*mode_env != '\0') sb_mode_str = mode_env;
+    }
+    policy.mode = lemon::sandbox::parse_sandbox_mode(sb_mode_str);
+
+    // Standard system paths
+    for (const auto& sp : lemon::sandbox::PolicyPresets::get_standard_system_paths()) {
+        policy.path_grants.push_back(sp);
+    }
+
+    // Executable read grant
+    if (!executable.empty()) {
+        policy.add_read_path(executable);
+        std::filesystem::path ep(executable);
+        if (ep.has_parent_path()) {
+            policy.add_read_path(ep.parent_path().string());
+        }
+    }
+
+    // Model path read grant
+    if (!model_path.empty()) {
+        policy.add_read_path(model_path);
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(model_path, ec)) {
+            std::filesystem::path mp(model_path);
+            if (mp.has_parent_path()) {
+                policy.add_read_path(mp.parent_path().string());
+            }
+        }
+    }
+
+    // Device & NPU subsystem path grants
+    std::string variant_lower = lower_copy(backend_variant);
+    bool is_gpu = (device_type == DEVICE_GPU) ||
+                  variant_lower == "vulkan" ||
+                  variant_lower == "rocm" ||
+                  variant_lower == "cuda";
+    bool is_npu = (device_type == DEVICE_NPU) ||
+                  variant_lower == "npu" ||
+                  variant_lower == "flm" ||
+                  variant_lower == "fastflowlm" ||
+                  variant_lower == "ryzenai";
+
+    if (is_gpu) {
+        for (const auto& dev : lemon::sandbox::PolicyPresets::get_standard_gpu_devices()) {
+            policy.add_device(dev);
+        }
+        if (variant_lower == "rocm" || variant_lower == "vllm") {
+            policy.add_read_path("/opt/rocm");
+        }
+        if (variant_lower == "cuda") {
+            policy.add_read_path("/opt/cuda");
+            policy.add_read_path("/usr/local/cuda");
+        }
+        if (variant_lower == "vulkan") {
+            policy.add_read_path("/etc/vulkan");
+            policy.add_read_path("/usr/share/vulkan");
+        }
+    }
+    if (is_npu) {
+        for (const auto& dev : lemon::sandbox::PolicyPresets::get_standard_npu_devices()) {
+            policy.add_device(dev);
+        }
+
+        // Executable tree write grant (for wrapper scripts setting up dynamic multiarch symlinks)
+        if (!executable.empty()) {
+            std::filesystem::path ep(executable);
+            if (ep.has_parent_path()) {
+                policy.add_write_path(ep.parent_path().string());
+            }
+        }
+
+        // NPU hardware discovery and driver subsystem paths
+        policy.add_read_path("/opt/xilinx");
+        policy.add_read_path("/opt/amd");
+        policy.add_read_path("/etc/xrt");
+        policy.add_read_path("/sys/class/accel");
+        policy.add_read_path("/sys/bus/pci");
+        policy.add_read_path("/sys/devices");
+
+        // FastFlowLM user home caches & model directories
+        const char* home = std::getenv("HOME");
+#ifdef _WIN32
+        if (!home) {
+            home = std::getenv("USERPROFILE");
+        }
+#endif
+        if (home) {
+            std::filesystem::path h(home);
+            std::filesystem::path flm_dir = h / ".fastflowlm";
+            std::filesystem::path flm_cache = h / ".cache" / "fastflowlm";
+            std::filesystem::path flm_flm_cache = h / ".cache" / "flm";
+            std::filesystem::path flm_config = h / ".config" / "flm";
+
+            std::error_code ec;
+            std::filesystem::create_directories(flm_dir, ec);
+            std::filesystem::create_directories(flm_cache, ec);
+            std::filesystem::create_directories(flm_flm_cache, ec);
+            std::filesystem::create_directories(flm_config, ec);
+
+            policy.add_write_path(flm_dir.string());
+            policy.add_write_path(flm_cache.string());
+            policy.add_write_path(flm_flm_cache.string());
+            policy.add_write_path(flm_config.string());
+        }
+        if (const char* flm_cache_env = std::getenv("FLM_CACHE_DIR")) {
+            std::error_code ec;
+            std::filesystem::create_directories(flm_cache_env, ec);
+            policy.add_write_path(flm_cache_env);
+        }
+        if (const char* xdg_config = std::getenv("XDG_CONFIG_HOME")) {
+            std::filesystem::path xc(xdg_config);
+            std::filesystem::path flm_config = xc / "flm";
+            std::error_code ec;
+            std::filesystem::create_directories(flm_config, ec);
+            policy.add_write_path(flm_config.string());
+        }
+    }
+
+    // Standard environment variables
+    policy.allow_env_vars(lemon::sandbox::PolicyPresets::get_standard_allowed_env_vars());
+
+    policy.normalize_paths();
+
+    return policy;
+}
+
+lemon::sandbox::SandboxPolicy WrappedServer::build_sandbox_policy(
+    const std::string& executable,
+    const std::string& model_path,
+    uint16_t port,
+    const std::string& backend_variant) const {
+    auto policy = build_default_sandbox_policy(model_path, executable, port, backend_variant, device_type_);
+    LOG(DEBUG, "WrappedServer") << "Enforcing sandbox policy for '" << server_name_ << "':\n"
+                                << policy.to_detailed_string() << std::endl;
+    return policy;
 }
 
 } // namespace lemon

@@ -1,5 +1,7 @@
 #include <lemon/utils/process_platform.h>
 #include <lemon/utils/aixlog.hpp>
+#include <lemon/sandbox/env_scrubber.h>
+#include <lemon/sandbox/sandbox_engine.h>
 
 #include <stdexcept>
 #include <iostream>
@@ -101,7 +103,8 @@ public:
         const std::string& working_dir,
         bool inherit_output,
         bool filter_health_logs,
-        const std::vector<std::pair<std::string, std::string>>& env_vars) override;
+        const std::vector<std::pair<std::string, std::string>>& env_vars,
+        const std::optional<lemon::sandbox::SandboxPolicy>& sandbox_policy = std::nullopt) override;
 
     void terminate(ProcessHandle handle) override;
     bool is_running(ProcessHandle handle) override;
@@ -132,7 +135,8 @@ protected:
         bool filter_health_logs,
         const std::vector<std::pair<std::string, std::string>>& env_vars,
         int stdout_pipe[2],
-        int stderr_pipe[2]);
+        int stderr_pipe[2],
+        const std::optional<lemon::sandbox::SandboxPolicy>& sandbox_policy = std::nullopt);
 };
 
 // Linux implementation using fork/exec
@@ -144,7 +148,20 @@ pid_t LinuxProcessPlatform::spawn_process(
     bool filter_health_logs,
     const std::vector<std::pair<std::string, std::string>>& env_vars,
     int stdout_pipe[2],
-    int stderr_pipe[2]) {
+    int stderr_pipe[2],
+    const std::optional<lemon::sandbox::SandboxPolicy>& sandbox_policy) {
+
+    // Sanitize environment before fork
+    std::vector<std::pair<std::string, std::string>> combined_env = env_vars;
+    std::vector<std::string> extra_allowlist;
+    if (sandbox_policy.has_value()) {
+        for (const auto& kv : sandbox_policy->explicit_env_vars) {
+            combined_env.push_back(kv);
+        }
+        extra_allowlist = sandbox_policy->allowed_env_vars;
+    }
+    auto sanitized_env = lemon::sandbox::EnvScrubber::sanitize_environment(
+        combined_env, extra_allowlist, true);
 
     pid_t pid = fork();
 
@@ -160,8 +177,9 @@ pid_t LinuxProcessPlatform::spawn_process(
             chdir(working_dir.c_str());
         }
 
-        // Set environment variables
-        for (const auto& env_pair : env_vars) {
+        // Clear inherited ambient environment secrets and apply sanitized environment
+        clearenv();
+        for (const auto& env_pair : sanitized_env) {
             setenv(env_pair.first.c_str(), env_pair.second.c_str(), 1);
         }
 
@@ -185,6 +203,16 @@ pid_t LinuxProcessPlatform::spawn_process(
 #ifdef HAVE_LIBCAP
         preserve_capabilities_for_exec();
 #endif
+
+        // Apply Sandbox Policy if configured
+        if (sandbox_policy.has_value()) {
+            auto engine = lemon::sandbox::SandboxEngine::create_for_platform();
+            std::string error_msg;
+            if (!engine->apply(*sandbox_policy, &error_msg)) {
+                std::cerr << "[ProcessPlatform] Sandbox apply failed: " << error_msg << std::endl;
+                _exit(127);
+            }
+        }
 
         // Prepare argv
         std::vector<char*> argv_ptrs;
@@ -210,7 +238,8 @@ ProcessHandle LinuxProcessPlatform::spawn(
     const std::string& working_dir,
     bool inherit_output,
     bool filter_health_logs,
-    const std::vector<std::pair<std::string, std::string>>& env_vars) {
+    const std::vector<std::pair<std::string, std::string>>& env_vars,
+    const std::optional<lemon::sandbox::SandboxPolicy>& sandbox_policy) {
 
     ProcessHandle handle;
     handle.handle = nullptr;
@@ -239,7 +268,8 @@ ProcessHandle LinuxProcessPlatform::spawn(
     }
 
     pid_t pid = spawn_process(executable, args, working_dir, inherit_output,
-                              filter_health_logs, env_vars, stdout_pipe, stderr_pipe);
+                              filter_health_logs, env_vars, stdout_pipe, stderr_pipe,
+                              sandbox_policy);
 
     handle.pid = pid;
 

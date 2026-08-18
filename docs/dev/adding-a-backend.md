@@ -134,6 +134,29 @@ Add the test to CI in both matrices of `.github/workflows/cpp_server_build_test_
 
 If your backend uses ROCm via TheRock, add its recipe to `_THEROCK_RECIPES` in `test/utils/server_base.py`. Otherwise a cold runner folds the one-time TheRock download into the first request's timeout instead of `TIMEOUT_ROCM_INSTALL`, and the ROCm job flakes.
 
+## Sandboxing and Policy Profiling
+
+All backend subprocesses spawned by `lemond` execute under dynamic kernel sandboxing (Landlock on Linux, Seatbelt on macOS) with default-deny network egress and path allowlisting.
+
+`WrappedServer::build_default_sandbox_policy()` automatically constructs the baseline policy for model paths, standard system libraries, and standard accelerator device nodes (`/dev/dri`, `/dev/kfd`, `/dev/accel*`, `/dev/shm`). If a new backend requires supplementary caches, auxiliary directories, or configuration paths, declare them in your server's `build_sandbox_policy()` override.
+
+### Profiling with `nono learn`
+
+To discover all system paths, device nodes, and environment requirements for a new or misbehaving backend, use `nono learn` from the [nono](https://nono.sh) toolchain to trace syscalls and generate a capability profile:
+
+```bash
+nono learn -- /path/to/backend-binary [args...]
+```
+
+### Debugging Sandbox Denials
+
+1. Start `lemond` with `--log-level debug` to inspect the full structured `SandboxPolicy` (allowed paths, devices, network rules, environment allowlists) logged before process spawn.
+2. Check Linux kernel Landlock audit logs for runtime permission denials:
+   ```bash
+   dmesg -wT | grep -E "landlock|audit"
+   ```
+3. Set `LEMONADE_SANDBOX_MODE=disabled` to isolate whether an issue stems from sandbox policy restrictions or intrinsic backend failures.
+
 ## Adding a new endpoint or capability
 
 Serving an existing capability interface (`ITranscriptionServer`, `IImageServer`, `ITextToSpeechServer`) needs nothing beyond the folder above. The endpoint, router plumbing, and API docs already exist, and the endpoint's test already covers any backend that serves it.

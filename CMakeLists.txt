@@ -994,6 +994,9 @@ set(SOURCES_CORE
     src/cpp/server/vad.cpp
     src/cpp/server/realtime_session.cpp
     src/cpp/server/websocket_server.cpp
+    src/cpp/server/sandbox/env_scrubber.cpp
+    src/cpp/server/sandbox/sandbox_engine.cpp
+    src/cpp/server/sandbox/nono_stub.cpp
 )
 
 # Add platform-specific source files to core
@@ -2235,15 +2238,13 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(EXISTS "${_PROCESS_MANAGER_TEST_SRC}")
         add_executable(test_process_manager
             test/cpp/test_process_manager.cpp
-            src/cpp/server/utils/process_manager.cpp
-            src/cpp/server/utils/platform/process_linux.cpp
         )
         target_include_directories(test_process_manager PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
             ${CMAKE_CURRENT_BINARY_DIR}/include
         )
         find_package(Threads REQUIRED)
-        target_link_libraries(test_process_manager PRIVATE Threads::Threads)
+        target_link_libraries(test_process_manager PRIVATE lemonade-server-core Threads::Threads)
         add_cpp_ci_test(ProcessManagerTest CI ON COMMAND test_process_manager)
     endif()
 endif()
@@ -3077,4 +3078,60 @@ if(BUILD_TESTING AND EXISTS "${_ROUTING_HELPER_RECONCILE_TEST_SRC}")
     add_executable(test_routing_helper_reconcile test/cpp/test_routing_helper_reconcile.cpp)
     target_link_libraries(test_routing_helper_reconcile PRIVATE lemonade-server-core)
     add_cpp_ci_test(RoutingHelperReconcileTest CI ON COMMAND test_routing_helper_reconcile)
+endif()
+
+set(_SANDBOX_POLICY_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_sandbox_policy.cpp")
+if(BUILD_TESTING AND EXISTS "${_SANDBOX_POLICY_TEST_SRC}")
+    add_executable(test_sandbox_policy test/cpp/test_sandbox_policy.cpp)
+    target_link_libraries(test_sandbox_policy PRIVATE lemonade-server-core)
+    add_cpp_ci_test(SandboxPolicyTest CI ON COMMAND test_sandbox_policy)
+endif()
+
+set(_ENV_SCRUBBER_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_env_scrubber.cpp")
+if(BUILD_TESTING AND EXISTS "${_ENV_SCRUBBER_TEST_SRC}")
+    add_executable(test_env_scrubber test/cpp/test_env_scrubber.cpp)
+    target_link_libraries(test_env_scrubber PRIVATE lemonade-server-core)
+    add_cpp_ci_test(EnvScrubberTest CI ON COMMAND test_env_scrubber)
+endif()
+
+set(_SANDBOX_ENGINE_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_sandbox_engine.cpp")
+if(BUILD_TESTING AND EXISTS "${_SANDBOX_ENGINE_TEST_SRC}")
+    add_executable(test_sandbox_engine test/cpp/test_sandbox_engine.cpp)
+    target_link_libraries(test_sandbox_engine PRIVATE lemonade-server-core)
+    add_cpp_ci_test(SandboxEngineTest CI ON COMMAND test_sandbox_engine)
+endif()
+
+set(_SANDBOX_ENGINE_ISOLATION_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_sandbox_engine_isolation.cpp")
+if(BUILD_TESTING AND EXISTS "${_SANDBOX_ENGINE_ISOLATION_TEST_SRC}")
+    add_executable(test_sandbox_engine_isolation test/cpp/test_sandbox_engine_isolation.cpp)
+    target_link_libraries(test_sandbox_engine_isolation PRIVATE lemonade-server-core)
+    add_cpp_ci_test(SandboxEngineIsolationTest CI ON COMMAND test_sandbox_engine_isolation)
+endif()
+
+set(_PROCESS_SANDBOX_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_process_sandbox.cpp")
+if(BUILD_TESTING AND EXISTS "${_PROCESS_SANDBOX_TEST_SRC}")
+    add_executable(test_process_sandbox test/cpp/test_process_sandbox.cpp)
+    target_link_libraries(test_process_sandbox PRIVATE lemonade-server-core)
+    add_cpp_ci_test(ProcessSandboxTest CI ON COMMAND test_process_sandbox)
+endif()
+
+set(_WRAPPED_SERVER_SANDBOX_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_wrapped_server_sandbox.cpp")
+if(BUILD_TESTING AND EXISTS "${_WRAPPED_SERVER_SANDBOX_TEST_SRC}")
+    add_executable(test_wrapped_server_sandbox test/cpp/test_wrapped_server_sandbox.cpp)
+    target_link_libraries(test_wrapped_server_sandbox PRIVATE lemonade-server-core)
+    add_cpp_ci_test(WrappedServerSandboxTest CI ON COMMAND test_wrapped_server_sandbox)
+endif()
+
+set(_ENV_SCRUBBER_CONFINEMENT_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_env_scrubber_confinement.cpp")
+if(BUILD_TESTING AND EXISTS "${_ENV_SCRUBBER_CONFINEMENT_TEST_SRC}")
+    add_executable(test_env_scrubber_confinement test/cpp/test_env_scrubber_confinement.cpp)
+    target_link_libraries(test_env_scrubber_confinement PRIVATE lemonade-server-core)
+    add_cpp_ci_test(EnvScrubberConfinementTest CI ON COMMAND test_env_scrubber_confinement)
+endif()
+
+set(_BACKEND_SANDBOX_CONFINEMENT_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_backend_sandbox_confinement.cpp")
+if(BUILD_TESTING AND EXISTS "${_BACKEND_SANDBOX_CONFINEMENT_TEST_SRC}")
+    add_executable(test_backend_sandbox_confinement test/cpp/test_backend_sandbox_confinement.cpp)
+    target_link_libraries(test_backend_sandbox_confinement PRIVATE lemonade-server-core)
+    add_cpp_ci_test(BackendSandboxConfinementTest CI ON COMMAND test_backend_sandbox_confinement)
 endif()

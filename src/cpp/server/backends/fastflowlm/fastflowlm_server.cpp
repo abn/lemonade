@@ -214,9 +214,10 @@ void FastFlowLMServer::load(const std::string& model_name,
     for (const auto& arg : args) {
         LOG(INFO, "ProcessManager") << " \"" << arg << "\"";
     }
-    LOG(INFO, "ProcessManager") << std::endl;
-
-    set_process_handle(utils::ProcessManager::start_process(flm_path, args, "", is_debug(), true));
+    lemon::sandbox::SandboxPolicy sandbox_policy = build_sandbox_policy(
+        flm_path, model_info.checkpoint(), port_, "npu");
+    set_process_handle(utils::ProcessManager::start_process(
+        flm_path, args, "", is_debug(), true, {}, sandbox_policy));
     LOG(INFO, "ProcessManager") << "Process started successfully" << std::endl;
 
     bool ready = wait_for_ready();

@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <nlohmann/json.hpp>
 #include <httplib.h>
+#include <lemon/sandbox/sandbox_policy.h>
 #include "utils/process_manager.h"
 #include "utils/http_client.h"
 #include "server_capabilities.h"
@@ -533,6 +534,19 @@ public:
     void set_prompt_tokens(int prompt_tokens) {
         telemetry_.prompt_tokens = prompt_tokens;
     }
+
+    virtual lemon::sandbox::SandboxPolicy build_sandbox_policy(
+        const std::string& executable,
+        const std::string& model_path,
+        uint16_t port,
+        const std::string& backend_variant = "") const;
+
+    static lemon::sandbox::SandboxPolicy build_default_sandbox_policy(
+        const std::string& model_path,
+        const std::string& executable,
+        uint16_t port,
+        const std::string& backend_variant = "",
+        DeviceType device_type = DEVICE_NONE);
 
 protected:
     struct BackendWatchdogPolicy {
