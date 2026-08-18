@@ -872,7 +872,9 @@ std::unique_ptr<SandboxEngine> SandboxEngine::create_nono_ffi_engine() {
 }
 
 std::unique_ptr<SandboxEngine> SandboxEngine::create_for_platform() {
-#if defined(_WIN32)
+#if defined(LEMON_HAS_NONO_RUST)
+    return create_nono_ffi_engine();
+#elif defined(_WIN32)
     return create_windows_fallback_engine();
 #elif defined(__APPLE__)
     return create_macos_seatbelt_engine();
@@ -887,7 +889,9 @@ std::string SandboxEngine::get_platform_engine_description(SandboxMode mode) {
     if (mode == SandboxMode::Disabled) {
         return "disabled (by configuration)";
     }
-#if defined(_WIN32)
+#if defined(LEMON_HAS_NONO_RUST)
+    return std::string("nono Rust C FFI (") + (mode == SandboxMode::Enforced ? "enforced" : "active") + ")";
+#elif defined(_WIN32)
     return "degraded (native Windows fallback mode, secret scrubbing active)";
 #elif defined(__APPLE__)
     return std::string("Seatbelt (") + (mode == SandboxMode::Enforced ? "enforced" : "active") + ")";

@@ -203,6 +203,25 @@ set(WEB_APP_BUILD_DIR "${CMAKE_BINARY_DIR}/resources/web-app")
 # instead of installing project-local dependencies with npm for web-app builds.
 option(USE_SYSTEM_NODEJS_MODULES "Use system-installed Node.js modules for building the Web app" OFF)
 
+# When ON, link against the real nono Rust library (libnono_c) via C FFI.
+# When OFF (default), lemond uses its in-tree native C++ Landlock/Seatbelt engine.
+option(LEMON_USE_NONO_RUST "Link external nono Rust C FFI library (libnono)" OFF)
+set(NONO_ROOT "" CACHE PATH "Path to nono Rust crate or prebuilt libnono installation")
+
+if(LEMON_USE_NONO_RUST)
+    find_path(NONO_INCLUDE_DIR NAMES nono.h PATHS ${NONO_ROOT}/include ${NONO_ROOT} /usr/local/include /usr/include)
+    find_library(NONO_LIBRARY NAMES nono_c nono nono_ffi PATHS ${NONO_ROOT}/lib ${NONO_ROOT}/target/release /usr/local/lib /usr/lib)
+    if(NONO_LIBRARY)
+        message(STATUS "Found nono Rust C FFI library: ${NONO_LIBRARY}")
+        add_compile_definitions(LEMON_HAS_NONO_RUST=1)
+        if(NONO_INCLUDE_DIR)
+            include_directories(${NONO_INCLUDE_DIR})
+        endif()
+    else()
+        message(WARNING "LEMON_USE_NONO_RUST=ON but libnono was not found, falling back to in-tree C++ engine")
+    endif()
+endif()
+
 # C++ Standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -996,8 +1015,11 @@ set(SOURCES_CORE
     src/cpp/server/websocket_server.cpp
     src/cpp/server/sandbox/env_scrubber.cpp
     src/cpp/server/sandbox/sandbox_engine.cpp
-    src/cpp/server/sandbox/nono_stub.cpp
 )
+
+if(NOT NONO_LIBRARY)
+    list(APPEND SOURCES_CORE src/cpp/server/sandbox/nono_stub.cpp)
+endif()
 
 # Add platform-specific source files to core
 if(WIN32)
@@ -1276,6 +1298,15 @@ endif()
 
 # lemond inherits all deps from lemonade-server-core
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE lemonade-server-core)
+if(NONO_LIBRARY)
+    target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${NONO_LIBRARY})
+    if(CMAKE_DL_LIBS)
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${CMAKE_DL_LIBS})
+    endif()
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE pthread)
+    endif()
+endif()
 
 # ============================================================
 # Resources
