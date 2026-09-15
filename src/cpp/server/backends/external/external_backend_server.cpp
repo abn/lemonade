@@ -213,6 +213,10 @@ void ExternalBackendServer::load(const std::string& model_name,
     if (!select_platform_block(options, block, selection_error)) {
         throw std::invalid_argument("recipe '" + manifest_->recipe + "': " + selection_error);
     }
+    const std::string detected_arch = SystemInfo::get_rocm_arch().empty()
+                                          ? SystemInfo::get_cuda_arch()
+                                          : SystemInfo::get_rocm_arch();
+    block = resolve_arch_block(block, detected_arch);
     active_block_ = block;
 
     port_ = choose_port();
@@ -262,6 +266,10 @@ void ExternalBackendServer::load(const std::string& model_name,
     sources.fixed["ze_affinity_mask"] = option_string(options, "ze_affinity_mask", gpu_id);
     sources.fixed["rocm_arch"] = SystemInfo::get_rocm_arch();
     sources.fixed["cuda_arch"] = SystemInfo::get_cuda_arch();
+    {
+        const std::string alias = arch_alias_for(manifest_->arch_aliases, detected_arch);
+        if (!alias.empty()) sources.fixed["arch_alias"] = alias;
+    }
 
     sources.custom_option = [options](const std::string& name, std::string& value) {
         json option = options.get_option(name);

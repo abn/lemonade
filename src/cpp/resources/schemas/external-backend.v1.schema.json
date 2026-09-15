@@ -114,6 +114,11 @@
       "description": "Open, additive extension bag for experimental or future keys. It is the only forward-compatible seam within major 1; a new first-class field, capability name, or token still requires a new major.",
       "additionalProperties": true
     },
+    "arch_aliases": {
+      "type": "object",
+      "description": "Maps a detected hardware arch (or arch glob such as 'gfx115*') to a short alias. The {arch_alias} token resolves through this map, so a name or tag that varies by arch is written once instead of duplicated across blocks.",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
     "platforms": { "$ref": "#/$defs/platforms" }
   },
   "allOf": [
@@ -233,12 +238,37 @@
           "description": "Overrides the top-level version_policy for this platform block."
         },
         "argv_extra": { "type": "array", "items": { "type": "string" } },
-        "reserved_args": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        "reserved_args": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "arch": { "$ref": "#/$defs/arch_overrides" }
       },
       "anyOf": [
         { "required": ["command", "args"] },
         { "required": ["binary"] }
       ]
+    },
+    "arch_overrides": {
+      "type": "object",
+      "description": "Arch-specific partial overrides merged onto this platform block. Keys are detected arch strings (gfx1151, sm_90) or globs (gfx115*). The base block stays the common config; only the per-arch deltas are written here.",
+      "additionalProperties": { "$ref": "#/$defs/arch_override" }
+    },
+    "arch_override": {
+      "type": "object",
+      "description": "A partial platform block. Any field present replaces the base field; env merges key-wise. Every field is optional.",
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "working_dir": { "type": "string" },
+        "stop_command": { "type": "string" },
+        "stop_command_args": { "type": "array", "items": { "type": "string" } },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "binary": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "source": { "type": "string", "pattern": "^https://" },
+        "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "version_policy": { "enum": ["pinned", "roll_forward"] },
+        "argv_extra": { "type": "array", "items": { "type": "string" } },
+        "reserved_args": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
     }
   }
 }

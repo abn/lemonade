@@ -166,6 +166,7 @@ struct CliConfig {
     bool external_yes = false;
     std::string external_recipe;
     std::string external_accelerator;
+    std::string external_arch;
     bool force = false;
     std::string output_file;
     bool downloaded = false;
@@ -592,7 +593,7 @@ static int handle_run_command(lemonade::LemonadeClient& client, CliConfig& confi
 
 namespace lemon {
 int run_external_backend_install(const std::string& recipe, bool assume_yes,
-                                 const std::string& accelerator);
+                                 const std::string& accelerator, const std::string& arch);
 int run_external_backend_uninstall(const std::string& recipe, bool assume_yes);
 }  // namespace lemon
 
@@ -604,7 +605,7 @@ static int handle_backends_command(lemonade::LemonadeClient& client,
                                    bool external_uninstall) {
     if (external_install) {
         return lemon::run_external_backend_install(config.external_recipe, config.external_yes,
-                                                   config.external_accelerator);
+                                                   config.external_accelerator, config.external_arch);
     }
     if (external_uninstall) {
         return lemon::run_external_backend_uninstall(config.external_recipe, config.external_yes);
@@ -1343,6 +1344,8 @@ int main(int argc, char* argv[]) {
     backends_install_external_cmd->add_option("recipe", config.external_recipe, "External recipe id")->required()->type_name("RECIPE");
     backends_install_external_cmd->add_option("--accelerator", config.external_accelerator,
         "Platform accelerator to install when a manifest publishes one artifact per platform (e.g. rocm, cuda, cpu)")->type_name("ACCEL");
+    backends_install_external_cmd->add_option("--arch", config.external_arch,
+        "Detected hardware arch (or glob) to install when a manifest chooses its artifact by arch (e.g. gfx1151)")->type_name("ARCH");
     backends_install_external_cmd->add_flag("--yes", config.external_yes, "Skip the consent prompt");
     backends_uninstall_external_cmd->add_option("recipe", config.external_recipe, "External recipe id")->required()->type_name("RECIPE");
     backends_uninstall_external_cmd->add_flag("--yes", config.external_yes, "Skip the consent prompt");

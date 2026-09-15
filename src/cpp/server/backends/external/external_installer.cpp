@@ -51,6 +51,7 @@ std::set<std::string> candidate_binary_names(const BackendManifest& manifest) {
 // when there is nothing pinned to fetch (a user-provided binary).
 const ExecBlock* select_install_block(const BackendManifest& manifest,
                                       const std::string& accelerator,
+                                      const std::string& arch,
                                       std::string& error) {
     const std::string os = host_os_name();
     auto os_it = manifest.platforms.by_os.find(os);
@@ -59,22 +60,45 @@ const ExecBlock* select_install_block(const BackendManifest& manifest,
         return nullptr;
     }
 
+    const auto& accelerators = os_it->second;
+    if (!accelerator.empty() && accelerators.find(accelerator) == accelerators.end()) {
+        error = "no platform block for accelerator '" + accelerator + "'";
+        return nullptr;
+    }
+
+    // A block is installable when the merged (arch-resolved) block has a source.
     std::map<std::string, const ExecBlock*> candidates;
-    for (const auto& [accel, block] : os_it->second) {
-        if (!block.source.empty() || !manifest.source.empty()) {
+    std::set<std::string> arch_choices;
+    bool any_arch_only_source = false;
+    for (const auto& [accel, block] : accelerators) {
+        if (!accelerator.empty() && accel != accelerator) continue;
+        const ExecBlock effective = resolve_arch_block(block, arch);
+        const bool has_source = !effective.source.empty() || !manifest.source.empty();
+        if (has_source) {
             candidates[accel] = &block;
+        } else if (arch.empty()) {
+            for (const auto& [pattern, override] : block.arch) {
+                if (override.source) {
+                    any_arch_only_source = true;
+                    arch_choices.insert(pattern);
+                }
+            }
         }
     }
 
-    if (!accelerator.empty()) {
-        auto it = candidates.find(accelerator);
-        if (it == candidates.end()) {
-            error = "no installable artifact for accelerator '" + accelerator + "'";
+    if (candidates.empty()) {
+        // A source that only exists in an arch override needs the arch named.
+        if (any_arch_only_source) {
+            std::string patterns;
+            for (const auto& pattern : arch_choices) {
+                if (!patterns.empty()) patterns += ", ";
+                patterns += pattern;
+            }
+            error = "manifest chooses its artifact by arch; pass --arch (" + patterns + ")";
             return nullptr;
         }
-        return it->second;
+        return nullptr;  // user-provided
     }
-    if (candidates.empty()) return nullptr;
     if (candidates.size() == 1) return candidates.begin()->second;
 
     std::string names;
@@ -129,12 +153,13 @@ std::string resolve_installed_binary(const std::string& recipe, const std::strin
 }
 
 InstallOutcome install_external_binary(const BackendManifest& manifest,
-                                       const std::string& accelerator) {
+                                       const std::string& accelerator,
+                                       const std::string& arch) {
     InstallOutcome outcome;
     const fs::path install_dir(external_install_dir(manifest.recipe));
 
     std::string select_error;
-    const ExecBlock* block = select_install_block(manifest, accelerator, select_error);
+    const ExecBlock* block = select_install_block(manifest, accelerator, arch, select_error);
     if (block == nullptr) {
         if (!select_error.empty()) {
             outcome.message = select_error;
@@ -150,16 +175,18 @@ InstallOutcome install_external_binary(const BackendManifest& manifest,
         return outcome;
     }
 
-    const std::string source = block->source.empty() ? manifest.source : block->source;
+    const ExecBlock effective = resolve_arch_block(*block, arch);
+    const std::string source =
+        effective.source.empty() ? manifest.source : effective.source;
     const std::string policy =
-        block->version_policy.empty() ? manifest.version_policy : block->version_policy;
-    const std::string hash = block->sha256.empty() ? manifest.sha256 : block->sha256;
+        effective.version_policy.empty() ? manifest.version_policy : effective.version_policy;
+    const std::string hash = effective.sha256.empty() ? manifest.sha256 : effective.sha256;
     const std::string wanted_binary =
-        block->binary.empty()
+        effective.binary.empty()
             ? (candidate_binary_names(manifest).empty()
                    ? ""
                    : *candidate_binary_names(manifest).begin())
-            : block->binary;
+            : effective.binary;
 
     std::error_code ec;
     fs::create_directories(install_dir, ec);

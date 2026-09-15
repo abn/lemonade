@@ -57,6 +57,30 @@ const std::set<std::string>& forbidden_env_keys() {
     return kKeys;
 }
 
+// Shell-style glob: '*' matches any run, '?' matches one character.
+bool glob_match(const std::string& pattern, const std::string& text) {
+    size_t p = 0;
+    size_t t = 0;
+    size_t star = std::string::npos;
+    size_t star_text = 0;
+    while (t < text.size()) {
+        if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == text[t])) {
+            ++p;
+            ++t;
+        } else if (p < pattern.size() && pattern[p] == '*') {
+            star = p++;
+            star_text = t;
+        } else if (star != std::string::npos) {
+            p = star + 1;
+            t = ++star_text;
+        } else {
+            return false;
+        }
+    }
+    while (p < pattern.size() && pattern[p] == '*') ++p;
+    return p == pattern.size();
+}
+
 bool valid_recipe_id(const std::string& id) {
     static const std::regex kPattern("^[a-z0-9][a-z0-9_-]{1,63}$");
     return std::regex_match(id, kPattern);
@@ -191,6 +215,168 @@ bool validate_block_tokens(const ExecBlock& block, const std::string& where, std
     return true;
 }
 
+bool parse_arch_overrides(const json& value,
+                          bool variant_of,
+                          const std::string& where,
+                          std::map<std::string, ExecOverride>& out,
+                          std::string& error) {
+    if (!value.is_object()) return fail(error, where + " must be an object");
+    for (auto it = value.begin(); it != value.end(); ++it) {
+        const std::string pattern = it.key();
+        const json& override_json = it.value();
+        if (pattern.empty()) return fail(error, where + " has an empty arch pattern");
+        if (!override_json.is_object()) {
+            return fail(error, where + "." + pattern + " must be an object");
+        }
+        const std::string owhere = where + "." + pattern;
+        if (!check_allowed_keys(override_json,
+                                {"command", "args", "working_dir", "stop_command",
+                                 "stop_command_args", "env", "binary", "source", "sha256",
+                                 "version_policy", "argv_extra", "reserved_args"},
+                                owhere, error)) {
+            return false;
+        }
+
+        ExecOverride override_out;
+        if (override_json.contains("command")) {
+            if (!override_json["command"].is_string() ||
+                override_json["command"].get<std::string>().empty()) {
+                return fail(error, owhere + ".command must be a non-empty string");
+            }
+            override_out.command = override_json["command"].get<std::string>();
+        }
+        if (override_json.contains("args")) {
+            std::vector<std::string> args;
+            if (!parse_string_array(override_json["args"], args, owhere + ".args", error)) return false;
+            override_out.args = std::move(args);
+        }
+        if (override_json.contains("working_dir")) {
+            if (!override_json["working_dir"].is_string()) {
+                return fail(error, owhere + ".working_dir must be a string");
+            }
+            override_out.working_dir = override_json["working_dir"].get<std::string>();
+        }
+        if (override_json.contains("stop_command")) {
+            if (!override_json["stop_command"].is_string()) {
+                return fail(error, owhere + ".stop_command must be a string");
+            }
+            override_out.stop_command = override_json["stop_command"].get<std::string>();
+        }
+        if (override_json.contains("stop_command_args")) {
+            std::vector<std::string> args;
+            if (!parse_string_array(override_json["stop_command_args"], args,
+                                    owhere + ".stop_command_args", error)) {
+                return false;
+            }
+            override_out.stop_command_args = std::move(args);
+        }
+        if (override_json.contains("env")) {
+            if (!override_json["env"].is_object()) return fail(error, owhere + ".env must be an object");
+            std::map<std::string, std::string> env;
+            for (auto env_it = override_json["env"].begin(); env_it != override_json["env"].end();
+                 ++env_it) {
+                if (!env_it.value().is_string()) {
+                    return fail(error, owhere + ".env values must be strings");
+                }
+                if (forbidden_env_keys().count(env_it.key()) > 0) {
+                    return fail(error, owhere + ".env must not set loader variable '" +
+                                           env_it.key() + "'");
+                }
+                env[env_it.key()] = env_it.value().get<std::string>();
+            }
+            override_out.env = std::move(env);
+        }
+        const bool has_provenance = override_json.contains("binary") ||
+                                    override_json.contains("source") ||
+                                    override_json.contains("sha256") ||
+                                    override_json.contains("version_policy");
+        if (has_provenance && !variant_of) {
+            return fail(error, owhere +
+                                   " may only set provenance fields with 'variant_of'");
+        }
+        if (override_json.contains("binary")) {
+            if (!override_json["binary"].is_string()) return fail(error, owhere + ".binary must be a string");
+            static const std::regex kBinaryPattern("^[A-Za-z0-9][A-Za-z0-9._-]*$");
+            const std::string binary = override_json["binary"].get<std::string>();
+            if (!std::regex_match(binary, kBinaryPattern)) {
+                return fail(error, owhere + ".binary must be a bare executable name");
+            }
+            override_out.binary = binary;
+        }
+        if (override_json.contains("source")) {
+            if (!override_json["source"].is_string()) return fail(error, owhere + ".source must be a string");
+            const std::string source = override_json["source"].get<std::string>();
+            if (source.rfind("https://", 0) != 0) {
+                return fail(error, owhere + ".source must be an absolute https:// URL");
+            }
+            override_out.source = source;
+        }
+        if (override_json.contains("sha256")) {
+            if (!override_json["sha256"].is_string()) return fail(error, owhere + ".sha256 must be a string");
+            static const std::regex kHashPattern("^sha256:[0-9a-f]{64}$");
+            const std::string hash = override_json["sha256"].get<std::string>();
+            if (!std::regex_match(hash, kHashPattern)) {
+                return fail(error, owhere + ".sha256 must be 'sha256:<64 lowercase hex>'");
+            }
+            override_out.sha256 = hash;
+        }
+        if (override_json.contains("version_policy")) {
+            if (!override_json["version_policy"].is_string()) {
+                return fail(error, owhere + ".version_policy must be a string");
+            }
+            const std::string policy = override_json["version_policy"].get<std::string>();
+            if (policy != "pinned" && policy != "roll_forward") {
+                return fail(error, owhere + ".version_policy must be 'pinned' or 'roll_forward'");
+            }
+            override_out.version_policy = policy;
+        }
+        if (override_json.contains("argv_extra")) {
+            std::vector<std::string> args;
+            if (!parse_string_array(override_json["argv_extra"], args, owhere + ".argv_extra", error)) {
+                return false;
+            }
+            override_out.argv_extra = std::move(args);
+        }
+        if (override_json.contains("reserved_args")) {
+            std::vector<std::string> args;
+            if (!parse_string_array(override_json["reserved_args"], args, owhere + ".reserved_args",
+                                    error)) {
+                return false;
+            }
+            override_out.reserved_args = std::move(args);
+        }
+
+        std::string scan_error;
+        auto scan = [&](const std::string& text, const std::string& field) -> bool {
+            if (!validate_tokens_in_string(text, scan_error)) {
+                error = owhere + "." + field + ": " + scan_error;
+                return false;
+            }
+            return true;
+        };
+        auto scan_list = [&](const std::vector<std::string>& list, const std::string& field) -> bool {
+            for (const auto& item : list) {
+                if (!scan(item, field)) return false;
+            }
+            return true;
+        };
+        if (override_out.command && !scan(*override_out.command, "command")) return false;
+        if (override_out.working_dir && !scan(*override_out.working_dir, "working_dir")) return false;
+        if (override_out.stop_command && !scan(*override_out.stop_command, "stop_command")) return false;
+        if (override_out.args && !scan_list(*override_out.args, "args")) return false;
+        if (override_out.stop_command_args && !scan_list(*override_out.stop_command_args, "stop_command_args")) return false;
+        if (override_out.argv_extra && !scan_list(*override_out.argv_extra, "argv_extra")) return false;
+        if (override_out.env) {
+            for (const auto& [key, value] : *override_out.env) {
+                if (!scan(value, "env." + key)) return false;
+            }
+        }
+
+        out[pattern] = std::move(override_out);
+    }
+    return true;
+}
+
 bool parse_exec_block(const json& value,
                       bool variant_of,
                       const std::string& where,
@@ -200,7 +386,7 @@ bool parse_exec_block(const json& value,
     if (!check_allowed_keys(value,
                             {"command", "args", "working_dir", "stop_command",
                              "stop_command_args", "env", "binary", "source", "sha256",
-                             "version_policy", "argv_extra", "reserved_args"},
+                             "version_policy", "argv_extra", "reserved_args", "arch"},
                             where, error)) {
         return false;
     }
@@ -305,6 +491,12 @@ bool parse_exec_block(const json& value,
         }
     }
 
+    if (value.contains("arch")) {
+        if (!parse_arch_overrides(value["arch"], variant_of, where + ".arch", out.arch, error)) {
+            return false;
+        }
+    }
+
     return validate_block_tokens(out, where, error);
 }
 
@@ -356,7 +548,7 @@ bool parse_backend_manifest(const json& doc, BackendManifest& out, std::string& 
                              "slot_policy", "model_management", "default_accelerator",
                              "recipe_options", "source", "sha256", "version_policy",
                              "endpoints", "custom_options", "downsize_endpoint",
-                             "extensions", "platforms"},
+                             "extensions", "arch_aliases", "platforms"},
                             "manifest", error)) {
         return false;
     }
@@ -579,32 +771,116 @@ bool parse_backend_manifest(const json& doc, BackendManifest& out, std::string& 
         out.extensions = doc["extensions"];
     }
 
+    if (doc.contains("arch_aliases")) {
+        if (!doc["arch_aliases"].is_object()) {
+            return fail(error, "'arch_aliases' must be an object");
+        }
+        for (auto it = doc["arch_aliases"].begin(); it != doc["arch_aliases"].end(); ++it) {
+            if (it.key().empty()) return fail(error, "'arch_aliases' has an empty arch pattern");
+            if (!it.value().is_string() || it.value().get<std::string>().empty()) {
+                return fail(error, "'arch_aliases' values must be non-empty strings");
+            }
+            out.arch_aliases[it.key()] = it.value().get<std::string>();
+        }
+    }
+
     if (!parse_platforms(doc["platforms"], !out.variant_of.empty(), out.platforms, error)) {
         return false;
     }
 
     // Effective provenance per block: block values override the top-level
-    // defaults. A block that fetches an artifact must pin it by hash unless its
-    // effective version policy is roll_forward. Cross-field rules with fallbacks
-    // live here rather than in the schema, which cannot see the parent.
+    // defaults, and an arch override overrides the block. A block (or arch
+    // variant) that fetches an artifact must pin it by hash unless its effective
+    // version policy is roll_forward. Cross-field rules with fallbacks live here
+    // rather than in the schema, which cannot see the parent.
+    auto check_provenance = [&](const ExecBlock& block, const ExecOverride* override,
+                                const std::string& label) -> bool {
+        const std::string source =
+            (override != nullptr && override->source)
+                ? *override->source
+                : (block.source.empty() ? out.source : block.source);
+        if (source.empty()) return true;
+        const std::string policy =
+            (override != nullptr && override->version_policy)
+                ? *override->version_policy
+                : (block.version_policy.empty() ? out.version_policy : block.version_policy);
+        const std::string hash =
+            (override != nullptr && override->sha256)
+                ? *override->sha256
+                : (block.sha256.empty() ? out.sha256 : block.sha256);
+        if (policy != "roll_forward" && hash.empty()) {
+            return fail(error, label +
+                                   " fetches an artifact and requires 'sha256' (or "
+                                   "'version_policy: roll_forward')");
+        }
+        return true;
+    };
     if (!out.variant_of.empty()) {
         for (const auto& [os, accelerators] : out.platforms.by_os) {
             for (const auto& [accelerator, block] : accelerators) {
-                const std::string source = block.source.empty() ? out.source : block.source;
-                if (source.empty()) continue;
-                const std::string policy =
-                    block.version_policy.empty() ? out.version_policy : block.version_policy;
-                const std::string hash = block.sha256.empty() ? out.sha256 : block.sha256;
-                if (policy != "roll_forward" && hash.empty()) {
-                    return fail(error, "'platforms." + os + "." + accelerator +
-                                           "' fetches an artifact and requires 'sha256' (or "
-                                           "'version_policy: roll_forward')");
+                const std::string base_label = "platforms." + os + "." + accelerator;
+                if (!check_provenance(block, nullptr, "'" + base_label + "'")) return false;
+                for (const auto& [pattern, override] : block.arch) {
+                    if (!check_provenance(block, &override,
+                                          "'" + base_label + ".arch." + pattern + "'")) {
+                        return false;
+                    }
                 }
             }
         }
     }
 
     return true;
+}
+
+const ExecOverride* match_arch_override(const std::map<std::string, ExecOverride>& overrides,
+                                        const std::string& arch) {
+    if (arch.empty() || overrides.empty()) return nullptr;
+    auto exact = overrides.find(arch);
+    if (exact != overrides.end()) return &exact->second;
+    for (const auto& [pattern, override] : overrides) {
+        if (pattern.find_first_of("*?") != std::string::npos && glob_match(pattern, arch)) {
+            return &override;
+        }
+    }
+    return nullptr;
+}
+
+ExecBlock apply_arch_override(const ExecBlock& base, const ExecOverride& override) {
+    ExecBlock out = base;
+    if (override.command) out.command = *override.command;
+    if (override.args) out.args = *override.args;
+    if (override.working_dir) out.working_dir = *override.working_dir;
+    if (override.stop_command) out.stop_command = *override.stop_command;
+    if (override.stop_command_args) out.stop_command_args = *override.stop_command_args;
+    if (override.env) {
+        for (const auto& [key, value] : *override.env) out.env[key] = value;
+    }
+    if (override.binary) out.binary = *override.binary;
+    if (override.source) out.source = *override.source;
+    if (override.sha256) out.sha256 = *override.sha256;
+    if (override.version_policy) out.version_policy = *override.version_policy;
+    if (override.argv_extra) out.argv_extra = *override.argv_extra;
+    if (override.reserved_args) out.reserved_args = *override.reserved_args;
+    return out;
+}
+
+ExecBlock resolve_arch_block(const ExecBlock& base, const std::string& arch) {
+    const ExecOverride* override = match_arch_override(base.arch, arch);
+    return override != nullptr ? apply_arch_override(base, *override) : base;
+}
+
+std::string arch_alias_for(const std::map<std::string, std::string>& aliases,
+                           const std::string& arch) {
+    if (arch.empty() || aliases.empty()) return "";
+    auto exact = aliases.find(arch);
+    if (exact != aliases.end()) return exact->second;
+    for (const auto& [pattern, alias] : aliases) {
+        if (pattern.find_first_of("*?") != std::string::npos && glob_match(pattern, arch)) {
+            return alias;
+        }
+    }
+    return "";
 }
 
 }  // namespace external

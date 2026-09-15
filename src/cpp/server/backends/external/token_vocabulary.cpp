@@ -13,7 +13,7 @@ const std::vector<std::string>& fixed_token_names() {
         "hf_cache", "cache_dir",
         "rocm_arch", "cuda_arch", "target_device", "hip_visible_devices",
         "cuda_visible_devices", "rocr_visible_devices", "ggml_vk_visible_devices",
-        "ze_affinity_mask",
+        "ze_affinity_mask", "arch_alias",
         "ctx_size", "batch_size", "ubatch_size", "threads", "cache_type_k",
         "cache_type_v",
         "custom_args",

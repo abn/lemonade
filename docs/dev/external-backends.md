@@ -146,6 +146,8 @@ To make another built-in usable as a `variant_of` base, extract that backend's a
 
 `ExternalInstaller` is the only code path that downloads. `install_external_binary` requires `https://`, verifies `sha256` unless the effective policy is `roll_forward`, extracts tarballs and zips, and places a bare binary under `<cache>/external/<recipe>/`. A platform block may override the top-level `source`, `sha256`, and `version_policy`, so a project that publishes one artifact per platform is one manifest. The installer selects the host OS block; when the manifest offers several artifacts for that OS it requires `--accelerator` and names the choices. `lemond` only launches what the CLI installed.
 
+Each platform block may also carry an `arch` map of arch pattern (`gfx1151`, `gfx115*`, `sm_90`) to a partial block. The block stays the common config and the override names only its deltas; exact matches win over globs, present fields replace the base field, and `env` merges key-wise. `match_arch_override` / `apply_arch_override` / `resolve_arch_block` in `backend_manifest.cpp` are shared by the loader and the installer, so argv and artifact selection cannot drift. Detect the arch from `get_rocm_arch()` (falling back to `get_cuda_arch()`). A top-level `arch_aliases` map resolves the `{arch_alias}` token, so a name or tag that varies by arch is written once and fails loudly when unmapped. When an artifact only exists in an arch override, install needs the arch: `lemonade backends install-external <recipe> --arch gfx1151`.
+
 ## The RFC02 boundary
 
 RFC01 covers discovery, strict validation, token substitution, capability gating, route proxying, and the install/consent flow. It deliberately stops there.

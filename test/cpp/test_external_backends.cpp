@@ -232,6 +232,31 @@ void test_parse_rejections() {
                     "platforms":{"linux":{"cpu":{"binary":"llama-server",
                     "source":"https://ex.invalid/a.tgz"}}}})",
                        "requires 'sha256'"));
+    check("arch override provenance without variant_of rejected",
+          rejects_with(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                    "capabilities":["completion"],"platforms":{"linux":{"cpu":
+                    {"command":"x","args":[],"arch":{"gfx1151":{"source":"https://ex.invalid/a.tgz"}}}}}})",
+                       "with 'variant_of'"));
+    check("arch override source without hash rejected",
+          rejects_with(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                    "variant_of":"llamacpp","capabilities":["completion"],
+                    "platforms":{"linux":{"cpu":{"binary":"llama-server",
+                    "arch":{"gfx1151":{"source":"https://ex.invalid/a.tgz"}}}}}})",
+                       "requires 'sha256'"));
+    check("arch override unknown field rejected",
+          rejects_with(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                    "variant_of":"llamacpp","capabilities":["completion"],
+                    "platforms":{"linux":{"cpu":{"binary":"llama-server",
+                    "arch":{"gfx1151":{"bogus":1}}}}}})",
+                       "unknown field"));
+    check("valid arch override with alias parses",
+          parses(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                    "variant_of":"llamacpp","arch_aliases":{"gfx1151":"strix-halo"},
+                    "capabilities":["completion"],
+                    "platforms":{"linux":{"cpu":{"binary":"llama-server",
+                    "argv_extra":["--tag","{arch_alias}"],
+                    "arch":{"gfx1151":{"source":"https://ex.invalid/a.tgz",
+                      "sha256":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}}}}}})"));
 }
 
 void write_file(const fs::path& path, const std::string& content, int mode) {
@@ -254,6 +279,45 @@ std::string simple_manifest(const std::string& recipe, const std::string& displa
         {"platforms", {{"linux", {{"cpu", {{"command", "x"}, {"args", json::array()}}}}}}},
     };
     return doc.dump(2);
+}
+
+void test_arch_resolution() {
+    ExecBlock base;
+    base.command = "podman";
+    base.args = {"run", "img:vulkan"};
+    base.env["A"] = "1";
+    base.env["B"] = "2";
+
+    ExecOverride override;
+    override.args = std::vector<std::string>{"run", "img-new"};
+    override.env = std::map<std::string, std::string>{{"B", "9"}, {"C", "3"}};
+    override.source = "https://ex.invalid/arch.tgz";
+
+    ExecBlock merged = apply_arch_override(base, override);
+    check("arch override replaces args",
+          merged.args.size() == 2 && merged.args[1] == "img-new");
+    check("arch override merges env",
+          merged.env["A"] == "1" && merged.env["B"] == "9" && merged.env["C"] == "3");
+    check("arch override sets source", merged.source == "https://ex.invalid/arch.tgz");
+
+    ExecBlock with_arch = base;
+    ExecOverride exact;
+    exact.command = "podman-exact";
+    ExecOverride glob;
+    glob.command = "podman-glob";
+    with_arch.arch["gfx1151"] = exact;
+    with_arch.arch["gfx115*"] = glob;
+
+    check("exact arch match wins",
+          resolve_arch_block(with_arch, "gfx1151").command == "podman-exact");
+    check("glob arch match", resolve_arch_block(with_arch, "gfx1150").command == "podman-glob");
+    check("no arch match keeps base", resolve_arch_block(with_arch, "sm_90").command == "podman");
+
+    std::map<std::string, std::string> aliases = {{"gfx1151", "strix-halo"},
+                                                  {"gfx115*", "strix"}};
+    check("alias exact", arch_alias_for(aliases, "gfx1151") == "strix-halo");
+    check("alias glob", arch_alias_for(aliases, "gfx1150") == "strix");
+    check("alias unmapped empty", arch_alias_for(aliases, "sm_90").empty());
 }
 
 void test_extends_merge() {
@@ -436,6 +500,7 @@ int main() {
     test_parse_valid();
     test_parse_rejections();
     test_token_engine();
+    test_arch_resolution();
     test_extends_merge();
     test_permission_checks();
     test_discovery_priority_and_reserved();

@@ -1,0 +1,33 @@
+{
+  "recipe": "toolbox-arch-alias",
+  "display_name": "Strix Halo toolbox (image name by arch alias)",
+  "api_contract_version": "1",
+  "arch_aliases": {
+    "gfx1151": "strix-halo",
+    "gfx1150": "strix-point"
+  },
+  "capabilities": ["chat_completion", "completion"],
+  "health_probe": {
+    "type": "http", "endpoint": "/health", "expected_status": 200,
+    "timeout_seconds": 300, "poll_interval_ms": 500
+  },
+  "platforms": {
+    "linux": {
+      "vulkan": {
+        "command": "podman",
+        "args": [
+          "run", "--rm", "--init", "--name", "lemonade-{recipe}-{port}",
+          "--device", "/dev/dri", "--group-add", "video",
+          "--security-opt", "seccomp=unconfined",
+          "--security-opt", "label=disable",
+          "-v", "{hf_cache}:/models:ro", "--network", "host",
+          "docker.io/kyuz0/amd-{arch_alias}-toolboxes:vulkan-radv",
+          "llama-server", "-m", "/models/{checkpoint_relative:main}",
+          "--host", "127.0.0.1", "--port", "{port}", "-c", "{ctx_size}"
+        ],
+        "stop_command": "podman",
+        "stop_command_args": ["rm", "-f", "lemonade-{recipe}-{port}"]
+      }
+    }
+  }
+}

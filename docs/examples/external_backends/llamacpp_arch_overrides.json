@@ -1,0 +1,37 @@
+{
+  "recipe": "llamacpp-arch-overrides",
+  "display_name": "llama.cpp Fork (arch-specific artifacts)",
+  "api_contract_version": "1",
+  "variant_of": "llamacpp",
+  "capabilities": ["chat_completion", "completion"],
+  "platforms": {
+    "linux": {
+      "rocm": {
+        "binary": "llama-server",
+        "argv_extra": ["--device-name", "{arch_alias}"],
+        "arch": {
+          "gfx1151": {
+            "source": "https://example.invalid/llamacpp-fork/gfx1151.tar.gz",
+            "sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+            "argv_extra": ["--device-name", "strix-halo", "--mtp"]
+          },
+          "gfx115*": {
+            "source": "https://example.invalid/llamacpp-fork/gfx115x.tar.gz",
+            "sha256": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        }
+      }
+    },
+    "windows": {
+      "cuda": {
+        "binary": "llama-server.exe",
+        "source": "https://example.invalid/llamacpp-fork/win-cuda.zip",
+        "sha256": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      }
+    }
+  },
+  "arch_aliases": {
+    "gfx1151": "strix-halo",
+    "gfx1150": "strix-point"
+  }
+}
