@@ -198,7 +198,6 @@ void SDServer::load(const std::string& model_name,
         backend = supported.backends.empty() ? "cpu" : supported.backends[0];
     }
     std::string resolved_backend = resolve_sdcpp_backend(backend);
-    std::string sdcpp_args = options.get_option("sdcpp_args");
 
     RuntimeConfig::validate_backend_choice("sdcpp", backend);
 
@@ -239,55 +238,7 @@ void SDServer::load(const std::string& model_name,
 
     LOG(INFO, "SDServer") << "Starting server on port " << port_ << " (backend: " << backend << ")" << std::endl;
 
-    std::vector<std::string> args = {
-        "--listen-port", std::to_string(port_)
-    };
-
-    if (llm_path.empty() || vae_path.empty()) {
-        args.push_back("-m");
-        args.push_back(model_path);
-    } else {
-        args.push_back("--diffusion-model");
-        args.push_back(model_path);
-        args.push_back("--llm");
-        args.push_back(llm_path);
-        args.push_back("--vae");
-        args.push_back(vae_path);
-    }
-
-    if (is_debug()) {
-        args.push_back("-v");
-    }
-
-    if (resolved_backend == "vulkan") {
-        LOG(INFO, "SDServer")
-            << "Applying Vulkan SD workaround: --vae-tiling --diffusion-fa"
-            << std::endl;
-        args.push_back("--vae-tiling");
-        args.push_back("--diffusion-fa");
-    }
-    std::set<std::string> reserved_flags = {
-        "-m",
-        "--model",
-        "--diffusion-model",
-        "--llm",
-        "--vae",
-        "-v",
-        "--listen-port"
-    };
-
-    if (!sdcpp_args.empty()) {
-        std::string validation_error = validate_custom_args(sdcpp_args, reserved_flags);
-        if (!validation_error.empty()) {
-            throw std::invalid_argument(
-                "Invalid custom sd-server arguments:\n" + validation_error
-            );
-        }
-
-        LOG(DEBUG, "SDServer") << "Adding custom arguments: " << sdcpp_args << std::endl;
-        std::vector<std::string> custom_args_vec = parse_custom_args(sdcpp_args);
-        args.insert(args.end(), custom_args_vec.begin(), custom_args_vec.end());
-    }
+    std::vector<std::string> args = build_server_args(model_info, options, port_, resolved_backend);
 
     std::vector<std::pair<std::string, std::string>> env_vars;
     fs::path exe_dir = fs::path(exe_path).parent_path();
@@ -405,6 +356,91 @@ void SDServer::load(const std::string& model_name,
     }
 
     LOG(INFO, "SDServer") << "Server is ready at http://127.0.0.1:" << get_backend_port() << std::endl;
+}
+
+std::vector<std::string> SDServer::build_server_args(const ModelInfo& model_info,
+                                                     const RecipeOptions& options,
+                                                     int port,
+                                                     const std::string& resolved_backend) const {
+    std::string sdcpp_args = options.get_option("sdcpp_args");
+    std::string model_path = model_info.resolved_path("main");
+    std::string llm_path = model_info.resolved_path("text_encoder");
+    std::string vae_path = model_info.resolved_path("vae");
+
+    std::vector<std::string> args = {
+        "--listen-port", std::to_string(port)
+    };
+
+    if (llm_path.empty() || vae_path.empty()) {
+        args.push_back("-m");
+        args.push_back(model_path);
+    } else {
+        args.push_back("--diffusion-model");
+        args.push_back(model_path);
+        args.push_back("--llm");
+        args.push_back(llm_path);
+        args.push_back("--vae");
+        args.push_back(vae_path);
+    }
+
+    if (is_debug()) {
+        args.push_back("-v");
+    }
+
+    if (resolved_backend == "vulkan") {
+        LOG(INFO, "SDServer")
+            << "Applying Vulkan SD workaround: --vae-tiling --diffusion-fa"
+            << std::endl;
+        args.push_back("--vae-tiling");
+        args.push_back("--diffusion-fa");
+    }
+
+    std::set<std::string> reserved_flags = {
+        "-m",
+        "--model",
+        "--diffusion-model",
+        "--llm",
+        "--vae",
+        "-v",
+        "--listen-port"
+    };
+
+    if (!sdcpp_args.empty()) {
+        std::string validation_error = validate_custom_args(sdcpp_args, reserved_flags);
+        if (!validation_error.empty()) {
+            throw std::invalid_argument(
+                "Invalid custom sd-server arguments:\n" + validation_error
+            );
+        }
+        LOG(DEBUG, "SDServer") << "Adding custom arguments: " << sdcpp_args << std::endl;
+        std::vector<std::string> custom_args_vec = parse_custom_args(sdcpp_args);
+        args.insert(args.end(), custom_args_vec.begin(), custom_args_vec.end());
+    }
+
+    return args;
+}
+
+bool SDServer::build_launch_plan(const ModelInfo& model_info,
+                                 const RecipeOptions& options,
+                                 int port,
+                                 LaunchPlan& out,
+                                 std::string& error) const {
+    std::string backend = options.get_option("sd-cpp_backend");
+    if (backend.empty()) {
+        auto supported = SystemInfo::get_supported_backends("sd-cpp");
+        backend = supported.backends.empty() ? "cpu" : supported.backends[0];
+    }
+    std::string resolved_backend = resolve_sdcpp_backend(backend);
+    out = LaunchPlan{};
+    try {
+        out.executable = BackendUtils::get_backend_binary_path(*sdcpp::spec(), backend);
+        out.args = build_server_args(model_info, options, port, resolved_backend);
+    } catch (const std::exception& e) {
+        error = e.what();
+        return false;
+    }
+    error.clear();
+    return true;
 }
 
 void SDServer::unload() {

@@ -32,6 +32,19 @@ public:
 
     void unload() override;
 
+    // Reuse the built-in argv construction against a variant_of fork binary.
+    bool build_launch_plan(const ModelInfo& model_info,
+                           const RecipeOptions& options,
+                           int port,
+                           LaunchPlan& out,
+                           std::string& error) const override;
+
+    // sd-server argv for a load, shared by load() and build_launch_plan().
+    std::vector<std::string> build_server_args(const ModelInfo& model_info,
+                                               const RecipeOptions& options,
+                                               int port,
+                                               const std::string& resolved_backend) const;
+
     // ICompletionServer implementation (not supported - return errors)
     json chat_completion(const json& request) override;
     json completion(const json& request) override;
