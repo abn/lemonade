@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "lemon/external/external_registry.h"
+#include "lemon/external/capability_registry.h"
 #include "lemon/backends/backend_registry.h"
 #include "lemon/system_info.h"
 #include "lemon/utils/aixlog.hpp"
@@ -398,6 +399,25 @@ void ExternalBackendServer::load(const std::string& model_name,
         throw std::invalid_argument("recipe '" + manifest_->recipe + "': " + resolve_error);
     }
 
+    // A model deploys in exactly one mode, so enable args for every declared
+    // capability that shares that mode are appended together.
+    for (const auto& capability : manifest_->capabilities) {
+        const CapabilityInfo* info = capability_info(capability);
+        if (info == nullptr || !info->has_mode) continue;
+        ModelType capability_mode = ModelType::LLM;
+        if (!deployment_mode_of(info->mode_label, capability_mode)) continue;
+        if (capability_mode != model_info.type) continue;
+        auto enable = manifest_->capability_enable_args.find(capability);
+        if (enable == manifest_->capability_enable_args.end()) continue;
+        std::vector<std::string> enable_args;
+        if (!resolve_args(enable->second, sources, enable_args, resolve_error)) {
+            throw std::invalid_argument("recipe '" + manifest_->recipe +
+                                        "': capability_enable_args." + capability + ": " +
+                                        resolve_error);
+        }
+        final_args.insert(final_args.end(), enable_args.begin(), enable_args.end());
+    }
+
     if (!block.stop_command.empty()) {
         std::vector<std::string> stop_args;
         std::string stop_error;
@@ -614,5 +634,19 @@ json ExternalBackendServer::slots_action(int slot_id, const std::string& action,
 json ExternalBackendServer::tokenize(const json& request_body) {
     return forward_request(endpoint_for("tokenize", "/v1/tokenize"), request_body);
 }
+
+bool ExternalBackendServer::downsize() {
+    if (manifest_ == nullptr || manifest_->downsize_endpoint.empty()) {
+        return true;
+    }
+    try {
+        json response = forward_request(manifest_->downsize_endpoint, json::object());
+        return !response.contains("error");
+    } catch (...) {
+        return false;
+    }
+}
+
+void ExternalBackendServer::restore() {}
 
 }  // namespace lemon

@@ -44,6 +44,8 @@ public:
     bool wait_for_ready(const std::string& endpoint,
                         long timeout_seconds = 600,
                         long poll_interval_ms = 100) override;
+    bool downsize() override;
+    void restore() override;
 
     bool has_capability(const std::string& cap_name) const override;
     DeviceType effective_device(const RecipeOptions& options) const override;

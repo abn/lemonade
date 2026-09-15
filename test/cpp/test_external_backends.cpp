@@ -179,6 +179,12 @@ void test_parse_rejections() {
           rejects_with(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
                             "capabilities":["completion"],"platforms":{"linux":{"cpu":
                             {"binary":"llama-server"}}}})", "only valid with 'variant_of'"));
+    check("enable args for undeclared capability rejected",
+          rejects_with(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                            "capabilities":["completion"],
+                            "capability_enable_args":{"embeddings":["--e"]},
+                            "platforms":{"linux":{"cpu":{"command":"x","args":[]}}}})",
+                       "not a declared capability"));
 }
 
 void write_file(const fs::path& path, const std::string& content, int mode) {
