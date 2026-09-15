@@ -1510,7 +1510,10 @@ std::string Router::get_streaming_transcription_address(const std::string& model
         return "";
     }
     auto* streaming = dynamic_cast<IStreamingTranscriptionServer*>(server);
-    return streaming ? streaming->get_streaming_address() : "";
+    if (streaming == nullptr || !server->has_capability("streaming_transcription")) {
+        return "";
+    }
+    return streaming->get_streaming_address();
 }
 
 template<typename Func>
@@ -1782,6 +1785,11 @@ json Router::chat_completion(const json& request, std::atomic<bool>* cancel) {
                 if (request.contains("max_tokens")) span->set_attribute("llm.config.max_tokens", request["max_tokens"]);
                 if (request.contains("max_completion_tokens")) span->set_attribute("llm.config.max_completion_tokens", request["max_completion_tokens"]);
             }
+            if (!server->has_capability("chat_completion")) {
+                return ErrorResponse::from_exception(
+                    UnsupportedOperationException("Chat completion", device_type_to_string(server->get_device_type()))
+                );
+            }
             return server->chat_completion(request);
         });
 
@@ -1900,6 +1908,11 @@ json Router::completion(const json& request) {
                 if (request.contains("top_p")) span->set_attribute("llm.config.top_p", request["top_p"]);
                 if (request.contains("max_tokens")) span->set_attribute("llm.config.max_tokens", request["max_tokens"]);
             }
+            if (!server->has_capability("completion")) {
+                return ErrorResponse::from_exception(
+                    UnsupportedOperationException("Completion", device_type_to_string(server->get_device_type()))
+                );
+            }
             return server->completion(request);
         });
 
@@ -1964,7 +1977,7 @@ json Router::embeddings(const json& request) {
                 span->set_attribute("embedding.recipe", identity.recipe);
             }
             auto embeddings_server = dynamic_cast<IEmbeddingsServer*>(server);
-            if (!embeddings_server) {
+            if (!embeddings_server || !server->has_capability("embeddings")) {
                 return ErrorResponse::from_exception(
                     UnsupportedOperationException("Embeddings", device_type_to_string(server->get_device_type()))
                 );
@@ -2020,7 +2033,7 @@ json Router::reranking(const json& request) {
                 span->set_attribute("reranker.recipe", identity.recipe);
             }
             auto reranking_server = dynamic_cast<IRerankingServer*>(server);
-            if (!reranking_server) {
+            if (!reranking_server || !server->has_capability("reranking")) {
                 return ErrorResponse::from_exception(
                     UnsupportedOperationException("Reranking", device_type_to_string(server->get_device_type()))
                 );
@@ -2070,7 +2083,7 @@ json Router::classify(const json& request) {
                 span->set_attribute("classifier.recipe", identity.recipe);
             }
             auto classification_server = dynamic_cast<IClassificationServer*>(server);
-            if (!classification_server) {
+            if (!classification_server || !server->has_capability("classification")) {
                 return ErrorResponse::from_exception(
                     UnsupportedOperationException("Classification", device_type_to_string(server->get_device_type()))
                 );
@@ -2113,7 +2126,7 @@ json Router::get_slots() {
 
         // Check if server supports slots capability
         slots_server = dynamic_cast<ISlotsServer*>(server);
-        if (!slots_server) {
+        if (!slots_server || !server->has_capability("slots")) {
             return ErrorResponse::from_exception(
                 UnsupportedOperationException("Slots", device_type_to_string(server->get_device_type()))
             );
@@ -2153,7 +2166,7 @@ json Router::slots_action(int slot_id, const std::string& action, const json& re
 
         // Check if server supports slots capability
         slots_server = dynamic_cast<ISlotsServer*>(server);
-        if (!slots_server) {
+        if (!slots_server || !server->has_capability("slots")) {
             return ErrorResponse::from_exception(
                 UnsupportedOperationException("Slots", device_type_to_string(server->get_device_type()))
             );
@@ -2193,7 +2206,7 @@ json Router::tokenize(const json& request_body) {
 
         // Check if server supports tokenize capability
         tokenizer_server = dynamic_cast<ITokenizerServer*>(server);
-        if (!tokenizer_server) {
+        if (!tokenizer_server || !server->has_capability("tokenize")) {
             return ErrorResponse::from_exception(
                 UnsupportedOperationException("Tokenization", device_type_to_string(server->get_device_type()))
             );
@@ -2219,6 +2232,11 @@ json Router::tokenize(const json& request_body) {
 
 json Router::responses(const json& request) {
     return execute_inference(request, [&](WrappedServer* server) {
+        if (!server->has_capability("responses")) {
+            return ErrorResponse::from_exception(
+                UnsupportedOperationException("Responses", device_type_to_string(server->get_device_type()))
+            );
+        }
         return server->responses(request);
     });
 }
@@ -2226,7 +2244,7 @@ json Router::responses(const json& request) {
 json Router::audio_transcriptions(const json& request) {
     return execute_inference(request, [&](WrappedServer* server) {
         auto transcription_server = dynamic_cast<ITranscriptionServer*>(server);
-        if (!transcription_server) {
+        if (!transcription_server || !server->has_capability("transcription")) {
             return ErrorResponse::from_exception(
                 UnsupportedOperationException("Audio transcription", device_type_to_string(server->get_device_type()))
             );
@@ -2243,7 +2261,7 @@ void Router::audio_speech(const json& request, httplib::DataSink& sink) {
                 "' is not a text-to-speech model");
         }
         auto tts_server = dynamic_cast<ITextToSpeechServer*>(server);
-        if (!tts_server) {
+        if (!tts_server || !server->has_capability("tts")) {
             throw UnsupportedOperationException("Text to speech", device_type_to_string(server->get_device_type()));
         }
         tts_server->audio_speech(request, sink);
@@ -2279,7 +2297,7 @@ AudioFormatMetadata Router::audio_speech_format_metadata(
 json Router::image_generations(const json& request) {
     return execute_inference(request, [&](WrappedServer* server) {
         auto image_server = dynamic_cast<IImageServer*>(server);
-        if (!image_server) {
+        if (!image_server || !server->has_capability("image")) {
             return ErrorResponse::from_exception(
                 UnsupportedOperationException("Image generation", device_type_to_string(server->get_device_type()))
             );
@@ -2291,7 +2309,7 @@ json Router::image_generations(const json& request) {
 json Router::image_edits(const json& request) {
     return execute_inference(request, [&](WrappedServer* server) {
         auto image_server = dynamic_cast<IImageServer*>(server);
-        if (!image_server) {
+        if (!image_server || !server->has_capability("image")) {
             return ErrorResponse::from_exception(
                 UnsupportedOperationException("Image editing", device_type_to_string(server->get_device_type()))
             );
@@ -2303,7 +2321,7 @@ json Router::image_edits(const json& request) {
 json Router::image_variations(const json& request) {
     return execute_inference(request, [&](WrappedServer* server) {
         auto image_server = dynamic_cast<IImageServer*>(server);
-        if (!image_server) {
+        if (!image_server || !server->has_capability("image")) {
             return ErrorResponse::from_exception(
                 UnsupportedOperationException("Image variations", device_type_to_string(server->get_device_type()))
             );
@@ -2320,7 +2338,7 @@ void Router::audio_generations(const json& request, httplib::DataSink& sink) {
                 "' is not an audio-generation model");
         }
         auto audio_server = dynamic_cast<IAudioGenerationServer*>(server);
-        if (!audio_server) {
+        if (!audio_server || !server->has_capability("audio_generation")) {
             throw UnsupportedOperationException("Audio generation", device_type_to_string(server->get_device_type()));
         }
         audio_server->audio_generations(request, sink);
@@ -2349,7 +2367,7 @@ AudioFormatMetadata Router::audio_generation_format_metadata(
 void Router::model_3d_generations(const json& request, httplib::DataSink& sink) {
     execute_streaming(request.dump(), sink, [&](WrappedServer* server) {
         auto model_server = dynamic_cast<IModel3DServer*>(server);
-        if (!model_server) {
+        if (!model_server || !server->has_capability("model_3d")) {
             throw UnsupportedOperationException("3D generation", device_type_to_string(server->get_device_type()));
         }
         model_server->model_3d_generations(request, sink);

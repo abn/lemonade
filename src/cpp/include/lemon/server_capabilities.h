@@ -20,6 +20,14 @@ struct AudioFormatMetadata {
 class ICapability {
 public:
     virtual ~ICapability() = default;
+
+    // Declared-capability gate. Built-in servers inherit the permissive default,
+    // so only a backend that overrides it (an external manifest-backed server)
+    // can turn an undeclared capability into an unsupported_operation envelope.
+    virtual bool has_capability(const std::string& cap_name) const {
+        (void)cap_name;
+        return true;
+    }
 };
 
 class ICompletionServer : public virtual ICapability {
@@ -122,9 +130,30 @@ public:
     virtual json tokenize(const json& request_body) = 0;
 };
 
+template <typename T>
+inline const char* capability_name_for_type() { return ""; }
+
+template <> inline const char* capability_name_for_type<IEmbeddingsServer>() { return "embeddings"; }
+template <> inline const char* capability_name_for_type<IRerankingServer>() { return "reranking"; }
+template <> inline const char* capability_name_for_type<ITranscriptionServer>() { return "transcription"; }
+template <> inline const char* capability_name_for_type<IStreamingTranscriptionServer>() { return "streaming_transcription"; }
+template <> inline const char* capability_name_for_type<ITextToSpeechServer>() { return "tts"; }
+template <> inline const char* capability_name_for_type<IClassificationServer>() { return "classification"; }
+template <> inline const char* capability_name_for_type<IImageServer>() { return "image"; }
+template <> inline const char* capability_name_for_type<IAudioGenerationServer>() { return "audio_generation"; }
+template <> inline const char* capability_name_for_type<IModel3DServer>() { return "model_3d"; }
+template <> inline const char* capability_name_for_type<ISlotsServer>() { return "slots"; }
+template <> inline const char* capability_name_for_type<ITokenizerServer>() { return "tokenize"; }
+
 template<typename T>
 bool supports_capability(ICapability* server) {
-    return dynamic_cast<T*>(server) != nullptr;
+    if (server == nullptr) return false;
+    if (dynamic_cast<T*>(server) == nullptr) return false;
+    const char* name = capability_name_for_type<T>();
+    if (name != nullptr && name[0] != '\0' && !server->has_capability(name)) {
+        return false;
+    }
+    return true;
 }
 
 // Which capability interfaces a backend's server class implements, as a bitmask

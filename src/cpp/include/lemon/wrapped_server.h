@@ -422,6 +422,14 @@ public:
     // ProcessManager::is_running(), which intentionally checks without reaping.
     virtual bool is_backend_alive() const;
 
+    // Declared-capability gate consulted by the router. Built-ins serve
+    // everything they implement; an external manifest-backed server narrows
+    // this to the capabilities its manifest declares.
+    virtual bool has_capability(const std::string& cap_name) const override {
+        (void)cap_name;
+        return true;
+    }
+
     // True once the backend watchdog force-reset the child process.
     bool was_watchdog_triggered() const { return watchdog_triggered_.load(std::memory_order_acquire); }
 
