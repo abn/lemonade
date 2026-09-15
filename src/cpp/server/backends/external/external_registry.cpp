@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <map>
 #include <set>
 #include <sstream>
 #include <system_error>
@@ -95,6 +97,22 @@ void add_system_dirs(DiscoveryPaths& paths) {
     paths.system.push_back("/Library/Application Support/Lemonade/backends");
     paths.system.push_back("/etc/lemonade/backends");
 #endif
+}
+
+// Fold a base manifest's declarative options into a child. Child keys win.
+void merge_manifest_into(BackendManifest& child, const BackendManifest& base) {
+    nlohmann::json merged = base.recipe_options.is_object() ? base.recipe_options
+                                                            : nlohmann::json::object();
+    for (auto it = child.recipe_options.begin(); it != child.recipe_options.end(); ++it) {
+        merged[it.key()] = it.value();
+    }
+    child.recipe_options = std::move(merged);
+
+    std::map<std::string, CustomOption> options;
+    for (const auto& opt : base.custom_options) options[opt.name] = opt;
+    for (const auto& opt : child.custom_options) options[opt.name] = opt;
+    child.custom_options.clear();
+    for (auto& [name, opt] : options) child.custom_options.push_back(std::move(opt));
 }
 
 }  // namespace
@@ -229,9 +247,9 @@ ExternalRegistry& ExternalRegistry::instance() {
 
 void ExternalRegistry::refresh(const DiscoveryPaths& paths,
                                const ReservedPredicate& is_reserved) {
-    std::vector<std::shared_ptr<BackendManifest>> loaded;
     std::vector<RejectedDescriptor> rejected;
     std::set<std::string> claimed;
+    std::map<std::string, std::shared_ptr<BackendManifest>> by_recipe;
 
     auto process_dir = [&](const std::string& dir, bool is_system) {
         std::error_code ec;
@@ -275,13 +293,50 @@ void ExternalRegistry::refresh(const DiscoveryPaths& paths,
                 continue;
             }
             manifest.source_path = file;
-            loaded.push_back(std::make_shared<BackendManifest>(std::move(manifest)));
+            // Capture the key before the move; the assignment's right operand is
+            // sequenced first, so reading manifest.recipe after it would key on
+            // the moved-from string.
+            const std::string recipe = manifest.recipe;
+            by_recipe[recipe] = std::make_shared<BackendManifest>(std::move(manifest));
         }
     };
 
     for (const auto& dir : paths.user_config) process_dir(dir, false);
     for (const auto& dir : paths.user_cache) process_dir(dir, false);
     for (const auto& dir : paths.system) process_dir(dir, true);
+
+    // Resolve `extends` after discovery so a base may live in any search path.
+    // Cycles and missing bases drop the child with a recorded reason.
+    std::set<std::string> extended;
+    std::vector<std::string> unresolved;
+    std::function<bool(BackendManifest&, std::set<std::string>&)> resolve =
+        [&](BackendManifest& manifest, std::set<std::string>& stack) -> bool {
+        if (manifest.extends_recipe.empty()) return true;
+        if (extended.count(manifest.recipe)) return true;
+        if (stack.count(manifest.recipe)) return false;
+        stack.insert(manifest.recipe);
+        auto base = by_recipe.find(manifest.extends_recipe);
+        if (base == by_recipe.end()) return false;
+        if (!resolve(*base->second, stack)) return false;
+        merge_manifest_into(manifest, *base->second);
+        stack.erase(manifest.recipe);
+        extended.insert(manifest.recipe);
+        return true;
+    };
+    for (auto& [recipe, manifest] : by_recipe) {
+        if (manifest->extends_recipe.empty()) continue;
+        std::set<std::string> stack;
+        if (!resolve(*manifest, stack)) {
+            rejected.push_back({manifest->source_path,
+                                "cannot resolve extends '" + manifest->extends_recipe + "'"});
+            unresolved.push_back(recipe);
+        }
+    }
+    for (const auto& recipe : unresolved) by_recipe.erase(recipe);
+
+    std::vector<std::shared_ptr<BackendManifest>> loaded;
+    loaded.reserve(by_recipe.size());
+    for (auto& [recipe, manifest] : by_recipe) loaded.push_back(std::move(manifest));
 
     std::lock_guard<std::mutex> lock(mutex_);
     manifests_ = std::move(loaded);

@@ -209,6 +209,53 @@ std::string simple_manifest(const std::string& recipe, const std::string& displa
     return doc.dump(2);
 }
 
+void test_extends_merge() {
+#ifndef _WIN32
+    std::string tpl = "/tmp/lemonade_ext_extends_XXXXXX";
+    char* dir = mkdtemp(tpl.data());
+    check("extends temp dir created", dir != nullptr);
+    if (dir == nullptr) return;
+
+    json base = {
+        {"recipe", "base_ext"},
+        {"display_name", "Base"},
+        {"api_contract_version", "1"},
+        {"capabilities", json::array({"completion"})},
+        {"recipe_options", {{"threads", 4}, {"ctx_size", 2048}}},
+        {"platforms", {{"linux", {{"cpu", {{"command", "x"}, {"args", json::array()}}}}}}},
+    };
+    json child = base;
+    child["recipe"] = "child_ext";
+    child["display_name"] = "Child";
+    child["extends"] = "base_ext";
+    child["recipe_options"] = {{"threads", 8}};
+
+    write_file(std::string(dir) + "/base_ext.json", base.dump(2), 0600);
+    write_file(std::string(dir) + "/child_ext.json", child.dump(2), 0600);
+
+    DiscoveryPaths paths;
+    paths.user_config.push_back(dir);
+    ExternalRegistry::instance().refresh(paths);
+    const BackendManifest* merged = ExternalRegistry::instance().manifest_for("child_ext");
+    check("extends child discovered", merged != nullptr);
+    if (merged != nullptr) {
+        check("extends inherits base option", merged->recipe_options.value("ctx_size", 0) == 2048);
+        check("extends child overrides base", merged->recipe_options.value("threads", 0) == 8);
+    }
+
+    // A missing base drops the child and records why.
+    json orphan = child;
+    orphan["recipe"] = "orphan_ext";
+    orphan["extends"] = "does_not_exist";
+    write_file(std::string(dir) + "/orphan_ext.json", orphan.dump(2), 0600);
+    ExternalRegistry::instance().refresh(paths);
+    check("orphan extends dropped",
+          ExternalRegistry::instance().manifest_for("orphan_ext") == nullptr);
+
+    fs::remove_all(dir);
+#endif
+}
+
 void test_permission_checks() {
 #ifndef _WIN32
     std::string template_path = "/tmp/lemonade_ext_reg_XXXXXX";
@@ -327,6 +374,7 @@ int main() {
     test_parse_valid();
     test_parse_rejections();
     test_token_engine();
+    test_extends_merge();
     test_permission_checks();
     test_discovery_priority_and_reserved();
     std::printf("=== %d failure(s) ===\n", failures);
