@@ -1,0 +1,39 @@
+{
+  "recipe": "llamacpp-per-platform",
+  "display_name": "llama.cpp Fork (one artifact per accelerator)",
+  "api_contract_version": "1",
+  "variant_of": "llamacpp",
+  "capabilities": ["chat_completion", "completion"],
+  "platforms": {
+    "linux": {
+      "rocm": {
+        "binary": "llama-server",
+        "source": "https://example.invalid/llamacpp-fork/linux-rocm.tar.gz",
+        "sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "argv_extra": ["--gpu-layers", "999"],
+        "reserved_args": ["--port", "--host", "-m"]
+      },
+      "cuda": {
+        "binary": "llama-server",
+        "source": "https://example.invalid/llamacpp-fork/linux-cuda.tar.gz",
+        "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "argv_extra": ["--gpu-layers", "999"],
+        "reserved_args": ["--port", "--host", "-m"]
+      },
+      "cpu": {
+        "binary": "llama-server",
+        "source": "https://example.invalid/llamacpp-fork/linux-cpu.tar.gz",
+        "sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    "windows": {
+      "cuda": {
+        "binary": "llama-server.exe",
+        "source": "https://example.invalid/llamacpp-fork/windows-cuda.zip",
+        "sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "argv_extra": ["--gpu-layers", "999"],
+        "reserved_args": ["--port", "--host", "-m"]
+      }
+    }
+  }
+}

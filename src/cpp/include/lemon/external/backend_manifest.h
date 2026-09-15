@@ -22,6 +22,8 @@ struct HealthProbe {
 
 // One platform's launch specification. A passthrough recipe sets command+args;
 // a variant_of recipe sets binary (the executable inside the fetched artifact).
+// source/sha256/version_policy override the top-level provenance for this block,
+// so a project that publishes one artifact per platform can be described once.
 struct ExecBlock {
     std::string command;
     std::vector<std::string> args;
@@ -30,6 +32,9 @@ struct ExecBlock {
     std::vector<std::string> stop_command_args;
     std::map<std::string, std::string> env;
     std::string binary;
+    std::string source;
+    std::string sha256;
+    std::string version_policy;
     std::vector<std::string> argv_extra;
     std::vector<std::string> reserved_args;
 };

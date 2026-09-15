@@ -132,15 +132,6 @@
     {
       "if": { "required": ["version_policy"] },
       "then": { "required": ["variant_of"] }
-    },
-    {
-      "if": {
-        "required": ["variant_of"],
-        "properties": {
-          "version_policy": { "not": { "const": "roll_forward" } }
-        }
-      },
-      "then": { "required": ["sha256"] }
     }
   ],
   "$defs": {
@@ -226,6 +217,20 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
           "description": "variant_of only: bare executable name inside the fetched artifact. No path separators or traversal."
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^https://",
+          "description": "variant_of only: overrides the top-level source for this platform block, so a project that publishes one artifact per platform or accelerator can be described in one manifest."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Overrides the top-level sha256 for this platform block."
+        },
+        "version_policy": {
+          "enum": ["pinned", "roll_forward"],
+          "description": "Overrides the top-level version_policy for this platform block."
         },
         "argv_extra": { "type": "array", "items": { "type": "string" } },
         "reserved_args": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }

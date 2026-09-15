@@ -144,7 +144,7 @@ The default returns `false` with `"backend does not expose a launch plan"`. `Lla
 
 To make another built-in usable as a `variant_of` base, extract that backend's argv construction out of `load()` into a `build_launch_plan` override that returns `executable`, `args`, `working_dir`, and `env` without launching, and have `load()` call the same helper. The route proxying does not need to change: the external server forwards to the fixed engine paths.
 
-`ExternalInstaller` is the only code path that downloads. `install_external_binary` requires `https://`, verifies `sha256` unless the policy is `roll_forward`, extracts tarballs and zips, and places a bare binary under `<cache>/external/<recipe>/`. `lemond` only launches what the CLI installed.
+`ExternalInstaller` is the only code path that downloads. `install_external_binary` requires `https://`, verifies `sha256` unless the effective policy is `roll_forward`, extracts tarballs and zips, and places a bare binary under `<cache>/external/<recipe>/`. A platform block may override the top-level `source`, `sha256`, and `version_policy`, so a project that publishes one artifact per platform is one manifest. The installer selects the host OS block; when the manifest offers several artifacts for that OS it requires `--accelerator` and names the choices. `lemond` only launches what the CLI installed.
 
 ## The RFC02 boundary
 

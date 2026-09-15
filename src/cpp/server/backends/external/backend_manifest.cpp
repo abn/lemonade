@@ -199,8 +199,8 @@ bool parse_exec_block(const json& value,
     if (!value.is_object()) return fail(error, where + " must be an object");
     if (!check_allowed_keys(value,
                             {"command", "args", "working_dir", "stop_command",
-                             "stop_command_args", "env", "binary", "argv_extra",
-                             "reserved_args"},
+                             "stop_command_args", "env", "binary", "source", "sha256",
+                             "version_policy", "argv_extra", "reserved_args"},
                             where, error)) {
         return false;
     }
@@ -224,6 +224,40 @@ bool parse_exec_block(const json& value,
     } else {
         if (has_binary) return fail(error, where + ".binary is only valid with 'variant_of'");
         if (!has_command) return fail(error, where + " must set 'command' and 'args'");
+    }
+
+    // Per-block provenance overrides; only a variant_of fetches an artifact.
+    const bool has_block_source = value.contains("source");
+    const bool has_block_sha = value.contains("sha256");
+    const bool has_block_policy = value.contains("version_policy");
+    if ((has_block_source || has_block_sha || has_block_policy) && !variant_of) {
+        return fail(error, where +
+                               " may only set 'source', 'sha256', or 'version_policy' with 'variant_of'");
+    }
+    if (has_block_source) {
+        if (!value["source"].is_string()) return fail(error, where + ".source must be a string");
+        out.source = value["source"].get<std::string>();
+        if (out.source.rfind("https://", 0) != 0) {
+            return fail(error, where + ".source must be an absolute https:// URL");
+        }
+    }
+    if (has_block_sha) {
+        if (!value["sha256"].is_string()) return fail(error, where + ".sha256 must be a string");
+        out.sha256 = value["sha256"].get<std::string>();
+        static const std::regex kHashPattern("^sha256:[0-9a-f]{64}$");
+        if (!std::regex_match(out.sha256, kHashPattern)) {
+            return fail(error, where + ".sha256 must be 'sha256:<64 lowercase hex>'");
+        }
+    }
+    if (has_block_policy) {
+        if (!value["version_policy"].is_string()) {
+            return fail(error, where + ".version_policy must be a string");
+        }
+        const std::string policy = value["version_policy"].get<std::string>();
+        if (policy != "pinned" && policy != "roll_forward") {
+            return fail(error, where + ".version_policy must be 'pinned' or 'roll_forward'");
+        }
+        out.version_policy = policy;
     }
 
     if (has_command) {
@@ -502,11 +536,6 @@ bool parse_backend_manifest(const json& doc, BackendManifest& out, std::string& 
             return fail(error, "'version_policy' is only valid with 'variant_of'");
         }
     }
-    if (!out.variant_of.empty() && out.version_policy != "roll_forward" &&
-        out.sha256.empty()) {
-        return fail(error, "variant_of with version_policy 'pinned' requires 'sha256'");
-    }
-
     if (doc.contains("endpoints")) {
         const json& endpoints = doc["endpoints"];
         if (!endpoints.is_object()) return fail(error, "'endpoints' must be an object");
@@ -552,6 +581,27 @@ bool parse_backend_manifest(const json& doc, BackendManifest& out, std::string& 
 
     if (!parse_platforms(doc["platforms"], !out.variant_of.empty(), out.platforms, error)) {
         return false;
+    }
+
+    // Effective provenance per block: block values override the top-level
+    // defaults. A block that fetches an artifact must pin it by hash unless its
+    // effective version policy is roll_forward. Cross-field rules with fallbacks
+    // live here rather than in the schema, which cannot see the parent.
+    if (!out.variant_of.empty()) {
+        for (const auto& [os, accelerators] : out.platforms.by_os) {
+            for (const auto& [accelerator, block] : accelerators) {
+                const std::string source = block.source.empty() ? out.source : block.source;
+                if (source.empty()) continue;
+                const std::string policy =
+                    block.version_policy.empty() ? out.version_policy : block.version_policy;
+                const std::string hash = block.sha256.empty() ? out.sha256 : block.sha256;
+                if (policy != "roll_forward" && hash.empty()) {
+                    return fail(error, "'platforms." + os + "." + accelerator +
+                                           "' fetches an artifact and requires 'sha256' (or "
+                                           "'version_policy: roll_forward')");
+                }
+            }
+        }
     }
 
     return true;

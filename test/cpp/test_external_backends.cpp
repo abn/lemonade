@@ -203,6 +203,35 @@ void test_parse_rejections() {
                             "capability_enable_args":{"completion":["{nope}"]},
                             "platforms":{"linux":{"cpu":{"command":"x","args":[]}}}})",
                        "unknown token"));
+    check("user-provided variant_of without sha accepted",
+          parses(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                    "variant_of":"llamacpp","capabilities":["completion"],
+                    "platforms":{"linux":{"cpu":{"binary":"llama-server"}}}})"));
+    check("per-platform source and hash accepted",
+          parses(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                    "variant_of":"llamacpp","capabilities":["completion"],
+                    "platforms":{"linux":{
+                      "rocm":{"binary":"llama-server","source":"https://ex.invalid/rocm.tgz",
+                        "sha256":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                      "cuda":{"binary":"llama-server","source":"https://ex.invalid/cuda.tgz",
+                        "sha256":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}})"));
+    check("top-level source with block hash accepted",
+          parses(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                    "variant_of":"llamacpp","source":"https://ex.invalid/a.tgz",
+                    "capabilities":["completion"],
+                    "platforms":{"linux":{"cpu":{"binary":"llama-server",
+                    "sha256":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}}})"));
+    check("block source without variant_of rejected",
+          rejects_with(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                    "capabilities":["completion"],"platforms":{"linux":{"cpu":
+                    {"command":"x","args":[],"source":"https://ex.invalid/a.tgz"}}}})",
+                       "with 'variant_of'"));
+    check("block source without hash rejected",
+          rejects_with(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                    "variant_of":"llamacpp","capabilities":["completion"],
+                    "platforms":{"linux":{"cpu":{"binary":"llama-server",
+                    "source":"https://ex.invalid/a.tgz"}}}})",
+                       "requires 'sha256'"));
 }
 
 void write_file(const fs::path& path, const std::string& content, int mode) {

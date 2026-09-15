@@ -34,16 +34,6 @@ using namespace external;
 
 namespace {
 
-std::string host_os() {
-#ifdef _WIN32
-    return "windows";
-#elif defined(__APPLE__)
-    return "darwin";
-#else
-    return "linux";
-#endif
-}
-
 std::string to_posix_path(const std::string& path) {
     std::string result = path;
     std::replace(result.begin(), result.end(), '\\', '/');
@@ -130,7 +120,7 @@ SlotPolicy ExternalBackendServer::effective_slot_policy(const RecipeOptions& opt
 bool ExternalBackendServer::select_platform_block(const RecipeOptions& options,
                                                   ExecBlock& out,
                                                   std::string& error) {
-    const std::string os = host_os();
+    const std::string os = host_os_name();
     auto os_it = manifest_->platforms.by_os.find(os);
     if (os_it == manifest_->platforms.by_os.end()) {
         error = "manifest has no platform block for host OS '" + os + "'";

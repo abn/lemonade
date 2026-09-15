@@ -76,7 +76,8 @@ bool confirm(bool assume_yes, const std::string& action) {
 
 }  // namespace
 
-int run_external_backend_install(const std::string& recipe, bool assume_yes) {
+int run_external_backend_install(const std::string& recipe, bool assume_yes,
+                                 const std::string& accelerator) {
     auto manifest = find_external(recipe);
     if (manifest == nullptr) {
         std::cerr << "No external backend manifest found for recipe '" << recipe << "'.\n";
@@ -87,7 +88,7 @@ int run_external_backend_install(const std::string& recipe, bool assume_yes) {
         std::cerr << "Aborted.\n";
         return 1;
     }
-    InstallOutcome outcome = install_external_binary(*manifest);
+    InstallOutcome outcome = install_external_binary(*manifest, accelerator);
     std::cout << outcome.message << "\n";
     return outcome.ok ? 0 : 1;
 }

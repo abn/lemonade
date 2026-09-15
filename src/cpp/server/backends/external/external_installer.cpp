@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <map>
 #include <set>
 
 #include "lemon/utils/archive_platform.h"
@@ -46,6 +47,47 @@ std::set<std::string> candidate_binary_names(const BackendManifest& manifest) {
     return names;
 }
 
+// The host-OS block an install should fetch. Returns null with an empty error
+// when there is nothing pinned to fetch (a user-provided binary).
+const ExecBlock* select_install_block(const BackendManifest& manifest,
+                                      const std::string& accelerator,
+                                      std::string& error) {
+    const std::string os = host_os_name();
+    auto os_it = manifest.platforms.by_os.find(os);
+    if (os_it == manifest.platforms.by_os.end()) {
+        error = "manifest has no platform block for host OS '" + os + "'";
+        return nullptr;
+    }
+
+    std::map<std::string, const ExecBlock*> candidates;
+    for (const auto& [accel, block] : os_it->second) {
+        if (!block.source.empty() || !manifest.source.empty()) {
+            candidates[accel] = &block;
+        }
+    }
+
+    if (!accelerator.empty()) {
+        auto it = candidates.find(accelerator);
+        if (it == candidates.end()) {
+            error = "no installable artifact for accelerator '" + accelerator + "'";
+            return nullptr;
+        }
+        return it->second;
+    }
+    if (candidates.empty()) return nullptr;
+    if (candidates.size() == 1) return candidates.begin()->second;
+
+    std::string names;
+    for (const auto& [accel, block] : candidates) {
+        (void)block;
+        if (!names.empty()) names += ", ";
+        names += accel;
+    }
+    error = "manifest publishes per-platform artifacts; pick one with --accelerator (" +
+            names + ")";
+    return nullptr;
+}
+
 std::string find_binary(const fs::path& root, const std::set<std::string>& names) {
     std::error_code ec;
     std::string fallback;
@@ -64,6 +106,16 @@ std::string find_binary(const fs::path& root, const std::set<std::string>& names
 
 }  // namespace
 
+std::string host_os_name() {
+#ifdef _WIN32
+    return "windows";
+#elif defined(__APPLE__)
+    return "darwin";
+#else
+    return "linux";
+#endif
+}
+
 std::string external_install_dir(const std::string& recipe) {
     return (fs::path(utils::get_cache_dir()) / "external" / recipe).string();
 }
@@ -76,11 +128,18 @@ std::string resolve_installed_binary(const std::string& recipe, const std::strin
     return find_binary(install_dir, {binary});
 }
 
-InstallOutcome install_external_binary(const BackendManifest& manifest) {
+InstallOutcome install_external_binary(const BackendManifest& manifest,
+                                       const std::string& accelerator) {
     InstallOutcome outcome;
     const fs::path install_dir(external_install_dir(manifest.recipe));
 
-    if (manifest.source.empty()) {
+    std::string select_error;
+    const ExecBlock* block = select_install_block(manifest, accelerator, select_error);
+    if (block == nullptr) {
+        if (!select_error.empty()) {
+            outcome.message = select_error;
+            return outcome;
+        }
         outcome.ok = true;
         outcome.message = "no pinned source; binary is user-provided at " +
                           install_dir.string();
@@ -91,19 +150,30 @@ InstallOutcome install_external_binary(const BackendManifest& manifest) {
         return outcome;
     }
 
+    const std::string source = block->source.empty() ? manifest.source : block->source;
+    const std::string policy =
+        block->version_policy.empty() ? manifest.version_policy : block->version_policy;
+    const std::string hash = block->sha256.empty() ? manifest.sha256 : block->sha256;
+    const std::string wanted_binary =
+        block->binary.empty()
+            ? (candidate_binary_names(manifest).empty()
+                   ? ""
+                   : *candidate_binary_names(manifest).begin())
+            : block->binary;
+
     std::error_code ec;
     fs::create_directories(install_dir, ec);
 
-    const std::string archive_name = url_basename(manifest.source);
+    const std::string archive_name = url_basename(source);
     const fs::path archive_path = install_dir / archive_name;
 
     utils::DownloadOptions options;
-    if (manifest.version_policy != "roll_forward" && !manifest.sha256.empty()) {
-        options.expected_hash = manifest.sha256;
+    if (policy != "roll_forward" && !hash.empty()) {
+        options.expected_hash = hash;
         options.expected_hash_algorithm = "sha256";
     }
     utils::DownloadResult result = utils::HttpClient::download_file(
-        manifest.source, archive_path.string(), nullptr, {}, options,
+        source, archive_path.string(), nullptr, {}, options,
         utils::HttpSecurityPolicy::ExternalHttpsOnly);
     if (!result.success) {
         outcome.message = "download failed: " + result.error_message;
@@ -125,23 +195,17 @@ InstallOutcome install_external_binary(const BackendManifest& manifest) {
             outcome.message = "failed to extract " + archive_name;
             return outcome;
         }
-    } else {
+    } else if (!wanted_binary.empty() && wanted_binary != archive_name) {
         // A bare binary: rename it to its declared name when we know one.
-        const auto names = candidate_binary_names(manifest);
-        if (!names.empty() && *names.begin() != archive_name) {
-            const fs::path renamed = install_dir / *names.begin();
-            fs::rename(archive_path, renamed, ec);
-            if (ec) {
-                outcome.message = "failed to place binary: " + ec.message();
-                return outcome;
-            }
+        const fs::path renamed = install_dir / wanted_binary;
+        fs::rename(archive_path, renamed, ec);
+        if (ec) {
+            outcome.message = "failed to place binary: " + ec.message();
+            return outcome;
         }
     }
 
-    outcome.binary_path = resolve_installed_binary(manifest.recipe,
-                                                    candidate_binary_names(manifest).empty()
-                                                        ? ""
-                                                        : *candidate_binary_names(manifest).begin());
+    outcome.binary_path = resolve_installed_binary(manifest.recipe, wanted_binary);
     if (outcome.binary_path.empty()) {
         outcome.message = "no binary found in installed artifact";
         return outcome;
