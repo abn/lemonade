@@ -270,6 +270,21 @@ void test_extends_merge() {
     check("orphan extends dropped",
           ExternalRegistry::instance().manifest_for("orphan_ext") == nullptr);
 
+    // A cycle drops both members rather than looping.
+    json cycle_a = base;
+    cycle_a["recipe"] = "cycle_a";
+    cycle_a["extends"] = "cycle_b";
+    json cycle_b = base;
+    cycle_b["recipe"] = "cycle_b";
+    cycle_b["extends"] = "cycle_a";
+    write_file(std::string(dir) + "/cycle_a.json", cycle_a.dump(2), 0600);
+    write_file(std::string(dir) + "/cycle_b.json", cycle_b.dump(2), 0600);
+    ExternalRegistry::instance().refresh(paths);
+    check("extends cycle dropped a",
+          ExternalRegistry::instance().manifest_for("cycle_a") == nullptr);
+    check("extends cycle dropped b",
+          ExternalRegistry::instance().manifest_for("cycle_b") == nullptr);
+
     fs::remove_all(dir);
 #endif
 }

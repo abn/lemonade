@@ -143,7 +143,7 @@ Field summary:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `recipe` | yes | Stable id, `^[a-z0-9][a-z0-9_-]{1,63}$`. Colliding with a built-in is rejected. |
-| `display_name` | yes | Shown by `/system-info` and `lemonade backends --all`. |
+| `display_name` | yes | Shown by `/system-info`. `lemonade backends --all` lists the recipe name. |
 | `api_contract_version` | yes | Must be `"1"`. A newer major is rejected with a clear message, never partially honored. |
 | `capabilities` | yes | Non-empty, unique, from the table above. |
 | `platforms` | yes | Non-empty OS map, each with a non-empty accelerator map. |
@@ -308,7 +308,7 @@ WARNING: this backend runs as an external subprocess. No process
 
 `--yes` skips the interactive confirmation. On a non-interactive terminal without `--yes`, the command refuses rather than assuming consent.
 
-- **install-external** downloads and verifies a `variant_of` binary. For a passthrough manifest that declares no `source`, there is nothing to download; the command records consent and provenance and tells you the binary is user-provided.
+- **install-external** downloads and verifies a `variant_of` binary. For a passthrough manifest that declares no `source`, there is nothing to download; the command shows provenance and the no-sandbox disclosure, then tells you the binary is user-provided.
 - **uninstall-external** removes the manifest and the install directory. It refuses to remove a system descriptor (one found under a system discovery path); remove those with your package manager.
 
 To see discovered external recipes:

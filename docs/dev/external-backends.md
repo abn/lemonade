@@ -95,7 +95,7 @@ The registry owns parsed manifests for its lifetime; callers hold non-owning poi
 | 3D generation | `has_capability("model_3d")` |
 | Slots | `has_capability("slots")` |
 | Tokenize | `has_capability("tokenize")` |
-| Responses | (not gated - see [Known gaps](#known-gaps)) |
+| Responses | `has_capability("responses")` |
 
 A failed gate becomes the standard `unsupported_operation` envelope, the same error a backend returns when it does not implement an interface. The `dynamic_cast` to the capability interface and the declared-capability check are both required: the manifest decides whether the route is shown, and the interface decides whether there is code to serve it.
 
@@ -132,15 +132,15 @@ virtual bool build_launch_plan(const ModelInfo& model_info,
                                std::string& error) const;
 ```
 
-The default returns `false` with `"backend does not expose a launch plan"`. `LlamaCppServer` is the first built-in to override it: it resolves the selected `llamacpp` variant and returns `BackendUtils::get_backend_binary_path(...)` plus `build_server_args(...)`, without spawning.
+The default returns `false` with `"backend does not expose a launch plan"`. `LlamaCppServer`, `WhisperServer`, and `SDServer` override it: each returns its spec's binary name plus the same `build_server_args(...)` its `load()` calls, without spawning or installing.
 
 `ExternalBackendServer::load` uses the seam when the manifest declares `variant_of`:
 
 1. `backends::create_server(variant_of, ctx)` creates the built-in server. A missing or non-built-in base is an error.
 2. `base->build_launch_plan(model_info, options, port_, plan, error)` produces the argv.
-3. The executable is replaced with `<cache>/external/<recipe>/<binary>`. If the binary is missing, the load fails.
+3. The executable is replaced with the installed fork binary, resolved by `resolve_installed_binary(recipe, binary)` (exact `<cache>/external/<recipe>/<binary>` when present, otherwise a recursive match for archives that nest a top-level directory). If it is missing, the load fails and names `install-external`.
 4. The manifest's `argv_extra` is resolved through the token engine and appended.
-5. The plan's environment is merged with the manifest's `env` block.
+5. The plan's environment is merged with the manifest's `env` block. On POSIX the fork's own directory is added to `LD_LIBRARY_PATH` so a fork that ships its own shared libraries loads.
 
 To make another built-in usable as a `variant_of` base, extract that backend's argv construction out of `load()` into a `build_launch_plan` override that returns `executable`, `args`, `working_dir`, and `env` without launching, and have `load()` call the same helper. The route proxying does not need to change: the external server forwards to the fixed engine paths.
 
@@ -162,9 +162,9 @@ The CLI's consent disclosure states this explicitly, and the schema description 
 
 These are code-level facts as of this RFC. They are documented here so the user guide and future work stay honest.
 
-- **`responses` is not gated.** `Router::responses` calls `server->responses(request)` without a `has_capability("responses")` check, so an external backend that declares only `chat_completion` still answers `POST /v1/responses`.
 - **Image upscale is out of the capability model.** `POST /v1/images/upscale` is dispatched directly to `SdCpp` or `TheNoise`, not through the `image` capability. An external backend cannot serve it.
-- **The `variant_of` missing-binary error names the wrong subcommand.** `ExternalBackendServer::load` tells the user to run `lemonade backends install <recipe>`, but the implemented subcommand is `install-external`.
-- **Several parsed fields have no runtime consumer:** `capability_enable_args`, `requested_ports` (validated to equal 1 only), `model_management`, `downsize_endpoint`, `extends`, the manifest's own `recipe_options`, and the defaults in `custom_options`. `custom_options` is surfaced in `/system-info` for display but its `default_value` is not applied.
-- **External recipe options are not in the option allowlist.** `RecipeOptions::keys_for_recipe` and `get_defaults` are built from built-in descriptors only, so an external recipe's declared option names are filtered out when a `RecipeOptions` is constructed. As a result, `{custom:NAME}` without a `:-DEFAULT` and `{custom_args}` may not resolve from `recipe_options.json`.
+- **Transcription and image edit/variation routes forward JSON, not multipart.** `ExternalBackendServer::audio_transcriptions`, `image_edits`, and `image_variations` post the Lemonade JSON body to the engine. An engine that only accepts OpenAI multipart needs an `endpoints` remap or does not fit yet.
+- **`variant_of` bases are limited to backends that expose a launch plan:** `llamacpp`, `whispercpp`, and `sd-cpp`. Other built-ins return "backend does not expose a launch plan".
+- **`requested_ports` must be 1.** Multi-port engines are not scheduled yet.
 - **Rejected descriptors are silent.** `ExternalRegistry::rejected()` records the reason but no API or log line exposes it, which makes a misconfigured manifest hard to diagnose.
+- **The deeper self-managed model RPC is deferred.** `model_management: self_managed` only means `lemond` does not pre-download weights; there is no readiness handshake.

@@ -21,7 +21,9 @@ import urllib.error
 import urllib.request
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-LEMOND_BINARY = os.path.join(REPO_ROOT, "build", "lemond")
+LEMOND_BINARY = os.environ.get(
+    "LEMOND_BINARY", os.path.join(REPO_ROOT, "build", "lemond")
+)
 PORT = int(os.environ.get("LEMONADE_TEST_PORT", "13357"))
 BASE = f"http://127.0.0.1:{PORT}/api/v1"
 
@@ -96,7 +98,9 @@ def request(method, path, payload=None, timeout=60):
 class ExternalBackendTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.exists(LEMOND_BINARY):
+        if "/" not in LEMOND_BINARY and shutil.which(LEMOND_BINARY) is None:
+            raise unittest.SkipTest(f"lemond binary not found: {LEMOND_BINARY}")
+        if "/" in LEMOND_BINARY and not os.path.exists(LEMOND_BINARY):
             raise unittest.SkipTest(f"lemond binary not found at {LEMOND_BINARY}")
 
         cls.workdir = tempfile.mkdtemp(prefix="lemonade_external_it_")
