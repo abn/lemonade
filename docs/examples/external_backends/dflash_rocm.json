@@ -1,0 +1,50 @@
+{
+  "recipe": "dflash-rocm",
+  "display_name": "DFlash Speculative Decoding Server (ROCm Podman)",
+  "api_contract_version": "1",
+  "capabilities": ["chat_completion", "completion"],
+  "slot_policy": "standard",
+  "health_probe": {
+    "type": "http",
+    "endpoint": "/health",
+    "expected_status": 200,
+    "timeout_seconds": 300,
+    "poll_interval_ms": 500
+  },
+  "platforms": {
+    "linux": {
+      "rocm": {
+        "command": "podman",
+        "args": [
+          "run",
+          "--rm",
+          "--name",
+          "lemonade-{recipe}-{port}",
+          "--device",
+          "/dev/kfd",
+          "--device",
+          "/dev/dri",
+          "--group-add",
+          "video",
+          "--group-add",
+          "render",
+          "--security-opt",
+          "seccomp=unconfined",
+          "-v",
+          "{model_dir}:/models:ro",
+          "--network",
+          "host",
+          "ghcr.io/luce-org/lucebox-hub:rocm-7.2@sha256:9f3a00000000000000000000000000000000000000000000000000000000c2",
+          "/opt/lucebox-hub/server/build/dflash_server",
+          "/models/{checkpoint_relative:main}",
+          "--host",
+          "{host}",
+          "--port",
+          "{port}"
+        ],
+        "stop_command": "podman",
+        "stop_command_args": ["rm", "-f", "-t", "0", "lemonade-{recipe}-{port}"]
+      }
+    }
+  }
+}

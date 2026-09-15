@@ -10,5 +10,9 @@
   "request.schema.json": {
     "sha256": "a8b37f9c1577bfd84e9e1f01241df6a356573a84bc09efdc6a1392a55d4a0fca",
     "released": false
+  },
+  "external-backend.v1.schema.json": {
+    "sha256": "e465c003d3c7c0718a541f2b7c3b0a07861b5917901a4db9ea040ba5926bc18a",
+    "released": false
   }
 }

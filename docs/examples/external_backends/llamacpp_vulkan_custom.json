@@ -1,0 +1,38 @@
+{
+  "recipe": "llamacpp-vulkan-custom",
+  "display_name": "llama.cpp Server (Vulkan Custom)",
+  "api_contract_version": "1",
+  "capabilities": ["chat_completion", "completion"],
+  "slot_policy": "standard",
+  "health_probe": {
+    "type": "http",
+    "endpoint": "/health",
+    "expected_status": 200,
+    "timeout_seconds": 60,
+    "poll_interval_ms": 200
+  },
+  "platforms": {
+    "linux": {
+      "vulkan": {
+        "command": "/opt/lemonade/bin/llamacpp/vulkan/llama-server",
+        "args": [
+          "-m",
+          "{checkpoint:main}",
+          "--host",
+          "{host}",
+          "--port",
+          "{port}",
+          "-c",
+          "{ctx_size}",
+          "-t",
+          "{threads}"
+        ],
+        "stop_command": "kill",
+        "stop_command_args": ["-9", "{pid}"],
+        "env": {
+          "GGML_VK_VISIBLE_DEVICES": "{custom:vk_device:-0}"
+        }
+      }
+    }
+  }
+}

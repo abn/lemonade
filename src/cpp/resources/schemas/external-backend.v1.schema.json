@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lemonade-server.ai/schemas/external-backend.v1.schema.json",
+  "title": "Lemonade external backend recipe manifest (v1)",
+  "description": "Declarative manifest for an out-of-tree inference backend. The manifest schema version is the recipe's api_contract_version. lemond accepts manifests at or below its supported major and rejects unknown fields, unknown capability names, and unknown token names rather than ignoring them. Process confinement, ambient-environment scrubbing, and the sandbox grant block are owned by the companion Backend Sandbox RFC, not by this schema. Unknown fields are rejected at every object level; the sole open seams are `recipe_options` and `extensions`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["recipe", "display_name", "api_contract_version", "capabilities", "platforms"],
+  "properties": {
+    "recipe": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$",
+      "description": "Stable recipe id. Must not collide with a built-in recipe; a collision is rejected at discovery."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "api_contract_version": {
+      "type": "string",
+      "const": "1",
+      "description": "Manifest contract major, equal to the schema major. lemond rejects a value above its supported major with a clear message rather than a generic schema error, and never partially honors it."
+    },
+    "extends": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$",
+      "description": "Recipe id whose declarative recipe_options this manifest inherits and may override. Declarative inheritance only; execution comes from this manifest or from variant_of. Mutually exclusive with variant_of. A cycle is rejected."
+    },
+    "variant_of": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$",
+      "description": "Built-in recipe whose argv construction this manifest reuses against an external binary. Mutually exclusive with extends. The referenced recipe must be a built-in backend."
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/capability" },
+      "description": "Capabilities this backend serves. Each maps to one deployment mode and one or more fixed Lemonade routes; a manifest never opens a route. An operation outside this set is answered with the existing unsupported_operation envelope."
+    },
+    "capability_enable_args": {
+      "type": "object",
+      "description": "Extra argv appended when the capability's deployment mode is the one the model is loaded in. A model deploys in exactly one mode, so every declared capability of that mode is enabled together. Keys must be declared capabilities.",
+      "propertyNames": { "$ref": "#/$defs/capability" },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "health_probe": { "$ref": "#/$defs/health_probe" },
+    "requested_ports": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "default": 1,
+      "description": "v1 defines the single-port contract. Multi-port is a reserved extension and a value above 1 is rejected."
+    },
+    "reserved_args": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Flags a user's {custom_args} must not supply. Enforced for an exact token or a leading '<flag>='; the check is exact and case-sensitive. Per-block reserved_args are unioned with these, with the block taking precedence."
+    },
+    "slot_policy": {
+      "enum": ["standard", "exclusive_npu", "coexist_by_type", "unmetered"],
+      "default": "standard"
+    },
+    "model_management": {
+      "enum": ["lemond_managed", "self_managed"],
+      "default": "lemond_managed",
+      "description": "self_managed means lemond does not pre-download model weights for this recipe. The readiness/model-inventory handshake is deferred by this RFC and is not implied by this flag."
+    },
+    "default_accelerator": {
+      "enum": ["cpu", "gpu", "rocm", "cuda", "vulkan", "metal", "oneapi", "npu", "tpu"],
+      "description": "Accelerator key chosen when the request names no device. If absent, lemond selects by runtime detection (rocm/cuda/vulkan/oneapi/tpu) and falls back to cpu."
+    },
+    "recipe_options": {
+      "type": "object",
+      "description": "Declarative recipe options, inherited and overridable via extends, and resolvable as {custom:NAME} tokens. Open by design: keys are option names, values may be string, number, boolean, or array.",
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^https://",
+      "description": "version-pinned binary source over HTTPS. The CLI fetches it and verifies sha256; lemond never downloads executables. variant_of only."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Content hash of the fetched artifact. Required for a variant_of unless version_policy is roll_forward."
+    },
+    "version_policy": {
+      "enum": ["pinned", "roll_forward"],
+      "default": "pinned",
+      "description": "pinned (default) requires sha256; roll_forward is an explicit opt-out for authors tracking a moving artifact. variant_of only."
+    },
+    "endpoints": {
+      "type": "object",
+      "description": "Extension: remaps a declared capability's nonstandard engine path onto Lemonade's fixed route. Never opens a route; the value is an engine-side path, not a Lemonade endpoint.",
+      "propertyNames": { "$ref": "#/$defs/capability" },
+      "additionalProperties": { "type": "string", "pattern": "^/" }
+    },
+    "custom_options": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/custom_option" }
+    },
+    "downsize_endpoint": {
+      "type": "string",
+      "pattern": "^/",
+      "description": "Extension: engine-side path invoked on soft-idle downsize."
+    },
+    "extensions": {
+      "type": "object",
+      "description": "Open, additive extension bag for experimental or future keys. It is the only forward-compatible seam within major 1; a new first-class field, capability name, or token still requires a new major.",
+      "additionalProperties": true
+    },
+    "platforms": { "$ref": "#/$defs/platforms" }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["variant_of"] },
+      "then": { "not": { "required": ["extends"] } }
+    },
+    {
+      "if": { "required": ["source"] },
+      "then": { "required": ["variant_of"] }
+    },
+    {
+      "if": { "required": ["sha256"] },
+      "then": { "required": ["variant_of"] }
+    },
+    {
+      "if": { "required": ["version_policy"] },
+      "then": { "required": ["variant_of"] }
+    },
+    {
+      "if": {
+        "required": ["variant_of"],
+        "properties": {
+          "version_policy": { "not": { "const": "roll_forward" } }
+        }
+      },
+      "then": { "required": ["sha256"] }
+    }
+  ],
+  "$defs": {
+    "capability": {
+      "enum": [
+        "chat_completion",
+        "completion",
+        "responses",
+        "embeddings",
+        "reranking",
+        "transcription",
+        "streaming_transcription",
+        "tts",
+        "classification",
+        "image",
+        "audio_generation",
+        "model_3d",
+        "slots",
+        "tokenize"
+      ]
+    },
+    "health_probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["http", "tcp", "process"], "default": "http" },
+        "endpoint": { "type": "string", "pattern": "^/" },
+        "expected_status": { "type": "integer", "minimum": 100, "maximum": 599, "default": 200 },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 600, "default": 90 },
+        "poll_interval_ms": { "type": "integer", "minimum": 10, "maximum": 5000, "default": 100 }
+      }
+    },
+    "custom_option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "cli_flag", "default_value", "help"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "cli_flag": { "type": "string", "pattern": "^--[a-z0-9-]+$" },
+        "default_value": {},
+        "type_name": { "type": "string" },
+        "help": { "type": "string" },
+        "group": { "type": "string" }
+      }
+    },
+    "platforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "linux": { "$ref": "#/$defs/accelerator_map" },
+        "darwin": { "$ref": "#/$defs/accelerator_map" },
+        "windows": { "$ref": "#/$defs/accelerator_map" }
+      }
+    },
+    "accelerator_map": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "cpu": { "$ref": "#/$defs/exec_block" },
+        "gpu": { "$ref": "#/$defs/exec_block" },
+        "rocm": { "$ref": "#/$defs/exec_block" },
+        "cuda": { "$ref": "#/$defs/exec_block" },
+        "vulkan": { "$ref": "#/$defs/exec_block" },
+        "metal": { "$ref": "#/$defs/exec_block" },
+        "oneapi": { "$ref": "#/$defs/exec_block" },
+        "npu": { "$ref": "#/$defs/exec_block" },
+        "tpu": { "$ref": "#/$defs/exec_block" }
+      }
+    },
+    "exec_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "working_dir": { "type": "string" },
+        "stop_command": { "type": "string" },
+        "stop_command_args": { "type": "array", "items": { "type": "string" } },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "binary": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "description": "variant_of only: bare executable name inside the fetched artifact. No path separators or traversal."
+        },
+        "argv_extra": { "type": "array", "items": { "type": "string" } },
+        "reserved_args": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      },
+      "anyOf": [
+        { "required": ["command", "args"] },
+        { "required": ["binary"] }
+      ]
+    }
+  }
+}

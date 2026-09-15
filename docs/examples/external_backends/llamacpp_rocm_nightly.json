@@ -1,0 +1,18 @@
+{
+  "recipe": "llamacpp-rocm-nightly",
+  "display_name": "llama.cpp ROCm Nightly (community fork)",
+  "api_contract_version": "1",
+  "variant_of": "llamacpp",
+  "capabilities": ["chat_completion", "completion", "embeddings"],
+  "source": "https://example.invalid/llamacpp-rocm/nightly/llama-server-linux-rocm.tar.gz",
+  "version_policy": "roll_forward",
+  "platforms": {
+    "linux": {
+      "rocm": {
+        "binary": "llama-server",
+        "argv_extra": ["--gpu-layers", "{custom:gpu_layers:-0}"],
+        "reserved_args": ["--port", "--host", "-m"]
+      }
+    }
+  }
+}
