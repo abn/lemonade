@@ -30,6 +30,13 @@ public:
 
     void unload() override;
 
+    // Reuse the built-in argv construction against a variant_of fork binary.
+    bool build_launch_plan(const ModelInfo& model_info,
+                           const RecipeOptions& options,
+                           int port,
+                           LaunchPlan& out,
+                           std::string& error) const override;
+
     // ICompletionServer implementation (not supported - return errors)
     json chat_completion(const json& request) override;
     json completion(const json& request) override;
@@ -39,6 +46,11 @@ public:
     json audio_transcriptions(const json& request) override;
 
 private:
+    // whisper-server argv for a load, shared by load() and build_launch_plan().
+    std::vector<std::string> build_server_args(const ModelInfo& model_info,
+                                               const RecipeOptions& options,
+                                               int port) const;
+
     // NPU compiled cache handling
     void download_npu_compiled_cache(const std::string& model_path,
                                       const ModelInfo& model_info,

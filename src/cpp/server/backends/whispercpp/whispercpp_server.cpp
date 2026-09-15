@@ -225,7 +225,6 @@ void WhisperServer::load(const std::string& model_name,
     LOG(INFO, "WhisperServer") << "Per-model settings: " << options.to_log_string() << std::endl;
 
     std::string whispercpp_backend = options.get_option("whispercpp_backend");
-    std::string whispercpp_args = options.get_option("whispercpp_args");
 
     RuntimeConfig::validate_backend_choice("whispercpp", whispercpp_backend);
 
@@ -266,29 +265,7 @@ void WhisperServer::load(const std::string& model_name,
     // Lemonade manages the model path and port;
     // optional whisper-server flags like --convert come from whispercpp_args.
     // Note: Don't include exe_path here - ProcessManager::start_process already handles it
-    std::vector<std::string> args = {
-        "-m", model_path,
-        "--port", std::to_string(port_)
-    };
-
-    std::set<std::string> reserved_flags = {
-        "-m",
-        "--model",
-        "--port"
-    };
-
-    if (!whispercpp_args.empty()) {
-        std::string validation_error = validate_custom_args(whispercpp_args, reserved_flags);
-        if (!validation_error.empty()) {
-            throw std::invalid_argument(
-                "Invalid custom whisper-server arguments:\n" + validation_error
-            );
-        }
-
-        LOG(DEBUG, "WhisperServer") << "Adding custom arguments: " << whispercpp_args << std::endl;
-        std::vector<std::string> custom_args_vec = parse_custom_args(whispercpp_args);
-        args.insert(args.end(), custom_args_vec.begin(), custom_args_vec.end());
-    }
+    std::vector<std::string> args = build_server_args(model_info, options, port_);
 
     // Note: whisper-server doesn't support --debug flag
 
@@ -345,6 +322,56 @@ void WhisperServer::load(const std::string& model_name,
     }
 
     LOG(INFO, "WhisperServer") << "Server is ready!" << std::endl;
+}
+
+std::vector<std::string> WhisperServer::build_server_args(const ModelInfo& model_info,
+                                                          const RecipeOptions& options,
+                                                          int port) const {
+    std::string model_path = model_info.resolved_path();
+    std::string whispercpp_args = options.get_option("whispercpp_args");
+
+    std::vector<std::string> args = {
+        "-m", model_path,
+        "--port", std::to_string(port)
+    };
+
+    std::set<std::string> reserved_flags = {
+        "-m",
+        "--model",
+        "--port"
+    };
+
+    if (!whispercpp_args.empty()) {
+        std::string validation_error = validate_custom_args(whispercpp_args, reserved_flags);
+        if (!validation_error.empty()) {
+            throw std::invalid_argument(
+                "Invalid custom whisper-server arguments:\n" + validation_error
+            );
+        }
+        LOG(DEBUG, "WhisperServer") << "Adding custom arguments: " << whispercpp_args << std::endl;
+        std::vector<std::string> custom_args_vec = parse_custom_args(whispercpp_args);
+        args.insert(args.end(), custom_args_vec.begin(), custom_args_vec.end());
+    }
+
+    return args;
+}
+
+bool WhisperServer::build_launch_plan(const ModelInfo& model_info,
+                                      const RecipeOptions& options,
+                                      int port,
+                                      LaunchPlan& out,
+                                      std::string& error) const {
+    std::string backend = options.get_option("whispercpp_backend");
+    out = LaunchPlan{};
+    try {
+        out.executable = BackendUtils::get_backend_binary_path(*whispercpp::spec(), backend);
+        out.args = build_server_args(model_info, options, port);
+    } catch (const std::exception& e) {
+        error = e.what();
+        return false;
+    }
+    error.clear();
+    return true;
 }
 
 void WhisperServer::unload() {
