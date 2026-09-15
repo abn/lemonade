@@ -2317,6 +2317,32 @@ if(BUILD_TESTING AND EXISTS "${_CUSTOM_ARGS_TEST_SRC}")
     add_cpp_ci_test(CustomArgsTest CI ON COMMAND test_custom_args)
 endif()
 
+# External backend manifest contract: schema-shaped parsing, capability registry,
+# token vocabulary, and discovery/integrity.
+set(_EXTERNAL_BACKENDS_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_external_backends.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_EXTERNAL_BACKENDS_TEST_SRC}")
+    add_executable(test_external_backends
+        test/cpp/test_external_backends.cpp
+        src/cpp/server/backends/external/backend_manifest.cpp
+        src/cpp/server/backends/external/capability_registry.cpp
+        src/cpp/server/backends/external/token_vocabulary.cpp
+        src/cpp/server/backends/external/token_engine.cpp
+        src/cpp/server/backends/external/external_registry.cpp
+    )
+    target_include_directories(test_external_backends PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+        ${CMAKE_CURRENT_BINARY_DIR}/include
+    )
+    find_package(Threads REQUIRED)
+    target_link_libraries(test_external_backends PRIVATE
+        nlohmann_json::nlohmann_json
+        Threads::Threads
+    )
+    add_cpp_ci_test(ExternalBackendsTest CI ON COMMAND test_external_backends)
+endif()
+
 # Recipe custom-argument scope resolution.
 set(_RECIPE_ARG_RESOLVER_TEST_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_recipe_arg_resolution.cpp"
