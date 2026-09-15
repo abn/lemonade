@@ -326,17 +326,30 @@ void ExternalBackendServer::load(const std::string& model_name,
         base_ctx.model_manager = model_manager_;
         base_ctx.backend_manager = backend_manager_;
         base_ctx.model_info = &model_info;
+        // variant_of must name a built-in backend. The registry only knows
+        // external manifests, so an external recipe named here is caught
+        // explicitly before create_server would hand back an external server.
+        // Keep this list in step with the built-ins that override build_launch_plan.
+        const std::string supported = "supported bases: llamacpp, whispercpp, sd-cpp";
+        if (ExternalRegistry::instance().manifest_for(manifest_->variant_of) != nullptr) {
+            throw std::invalid_argument("recipe '" + manifest_->recipe +
+                                        "': variant_of must name a built-in backend; '" +
+                                        manifest_->variant_of + "' is an external recipe (" +
+                                        supported + ")");
+        }
         auto base = backends::create_server(manifest_->variant_of, base_ctx);
         if (!base) {
             throw std::invalid_argument("recipe '" + manifest_->recipe + "': variant_of base '" +
-                                        manifest_->variant_of + "' is not a built-in backend");
+                                        manifest_->variant_of + "' is not a built-in backend (" +
+                                        supported + ")");
         }
         LaunchPlan plan;
         std::string plan_error;
         if (!base->build_launch_plan(model_info, options, port_, plan, plan_error)) {
-            throw std::invalid_argument("recipe '" + manifest_->recipe +
-                                        "': variant_of base '" + manifest_->variant_of +
-                                        "' cannot provide a launch plan: " + plan_error);
+            throw std::invalid_argument("recipe '" + manifest_->recipe + "': built-in '" +
+                                        manifest_->variant_of +
+                                        "' does not expose a launch plan yet; " + plan_error +
+                                        " (" + supported + ")");
         }
         const std::string binary_name = block.binary.empty()
                                             ? fs::path(plan.executable).filename().string()
