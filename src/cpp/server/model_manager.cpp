@@ -11,6 +11,7 @@
 #include <lemon/backends/backend_descriptor_registry.h>
 #include <lemon/backends/backend_registry.h>
 #include <lemon/backends/backend_utils.h>
+#include <lemon/external/external_registry.h>
 #include <lemon/backends/cloud/cloud_server.h>
 #include <lemon/backends/fastflowlm/fastflowlm_models.h>
 #include <lemon/cloud_provider_registry.h>
@@ -28,6 +29,7 @@
 #include <thread>
 #include <chrono>
 #include <set>
+#include <mutex>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -4289,7 +4291,14 @@ bool ModelManager::is_model_downloaded(const std::string& model_name) {
 
 bool ModelManager::backend_self_manages_downloads(const std::string& recipe) const {
     const auto* desc = backends::descriptor_for(recipe);
-    return desc && desc->self_manages_downloads;
+    if (desc && desc->self_manages_downloads) return true;
+    static std::once_flag external_once;
+    std::call_once(external_once, []() {
+        lemon::external::ExternalRegistry::instance().refresh(
+            [](const std::string& candidate) { return lemon::backends::has_backend(candidate); });
+    });
+    const auto* manifest = lemon::external::ExternalRegistry::instance().manifest_for(recipe);
+    return manifest != nullptr && manifest->model_management == "self_managed";
 }
 
 void ModelManager::download_registered_model(const ModelInfo& info, bool do_not_upgrade, DownloadProgressCallback progress_callback) {
