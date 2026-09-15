@@ -107,6 +107,7 @@ void test_token_vocabulary() {
     check("empty token rejected", !validate_tokens_in_string("{}", error));
     check("unterminated token rejected", !validate_tokens_in_string("{port", error));
     check("nested token rejected", !validate_tokens_in_string("{a{b}}", error));
+    check("checkpoint default rejected", !validate_tokens_in_string("{checkpoint:main:-x}", error));
 }
 
 void test_parse_valid() {
@@ -185,6 +186,23 @@ void test_parse_rejections() {
                             "capability_enable_args":{"embeddings":["--e"]},
                             "platforms":{"linux":{"cpu":{"command":"x","args":[]}}}})",
                        "not a declared capability"));
+    check("health status out of range rejected",
+          rejects_with(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                            "capabilities":["completion"],
+                            "health_probe":{"expected_status":999},
+                            "platforms":{"linux":{"cpu":{"command":"x","args":[]}}}})",
+                       "between 100 and 599"));
+    check("loader env var rejected",
+          rejects_with(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                            "capabilities":["completion"],"platforms":{"linux":{"cpu":
+                            {"command":"x","args":[],"env":{"LD_PRELOAD":"/evil.so"}}}}})",
+                       "loader variable"));
+    check("enable args unknown token rejected",
+          rejects_with(R"({"recipe":"ok_recipe","display_name":"x","api_contract_version":"1",
+                            "capabilities":["completion"],
+                            "capability_enable_args":{"completion":["{nope}"]},
+                            "platforms":{"linux":{"cpu":{"command":"x","args":[]}}}})",
+                       "unknown token"));
 }
 
 void write_file(const fs::path& path, const std::string& content, int mode) {

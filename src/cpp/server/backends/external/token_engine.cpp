@@ -4,6 +4,7 @@
 #include <cctype>
 
 #include "lemon/external/token_vocabulary.h"
+#include "lemon/utils/custom_args.h"
 
 namespace lemon {
 namespace external {
@@ -130,32 +131,7 @@ bool env_name_allowed(const std::string& name) {
 }
 
 bool is_negative_number(const std::string& value) {
-    if (value.size() < 2 || value[0] != '-') return false;
-    size_t i = 1;
-    bool has_digits = false;
-    while (i < value.size() && value[i] >= '0' && value[i] <= '9') {
-        has_digits = true;
-        ++i;
-    }
-    if (i < value.size() && value[i] == '.') {
-        ++i;
-        while (i < value.size() && value[i] >= '0' && value[i] <= '9') {
-            has_digits = true;
-            ++i;
-        }
-    }
-    if (!has_digits) return false;
-    if (i < value.size() && (value[i] == 'e' || value[i] == 'E')) {
-        ++i;
-        if (i < value.size() && (value[i] == '-' || value[i] == '+')) ++i;
-        bool has_exp_digits = false;
-        while (i < value.size() && value[i] >= '0' && value[i] <= '9') {
-            has_exp_digits = true;
-            ++i;
-        }
-        if (!has_exp_digits) return false;
-    }
-    return i == value.size();
+    return lemon::utils::is_negative_number_token(value);
 }
 
 bool resolve_template(const std::string& template_text,

@@ -32,17 +32,19 @@ bool is_name(const std::string& s) {
     return true;
 }
 
-// Validates the part after a known prefix, optionally allowing `:-DEFAULT`.
-bool valid_prefixed_spec(const std::string& rest, std::string& error) {
+// Validates the part after a known prefix. Only custom: and env: accept a
+// `:-DEFAULT`, because only those two have a value source to fall back on.
+bool valid_prefixed_spec(const std::string& rest, bool allow_default, std::string& error) {
     if (rest.empty()) {
         error = "token is missing its name";
         return false;
     }
-    std::string name = rest;
     size_t sep = rest.find(":-");
-    if (sep != std::string::npos) {
-        name = rest.substr(0, sep);
+    if (sep != std::string::npos && !allow_default) {
+        error = "token '" + rest.substr(0, sep) + "' does not take a default";
+        return false;
     }
+    std::string name = (sep != std::string::npos) ? rest.substr(0, sep) : rest;
     if (!is_name(name)) {
         error = "invalid token name '" + name + "'";
         return false;
@@ -59,12 +61,20 @@ bool is_known_token(const std::string& inner, std::string& error) {
         return false;
     }
 
-    static const char* kPrefixed[] = {"checkpoint_relative:", "checkpoint:",
-                                      "custom:", "env:"};
-    for (const char* prefix : kPrefixed) {
-        size_t len = std::char_traits<char>::length(prefix);
-        if (inner.compare(0, len, prefix) == 0) {
-            return valid_prefixed_spec(inner.substr(len), error);
+    struct Prefix {
+        const char* text;
+        bool allow_default;
+    };
+    static const Prefix kPrefixed[] = {
+        {"checkpoint_relative:", false},
+        {"checkpoint:", false},
+        {"custom:", true},
+        {"env:", true},
+    };
+    for (const auto& prefix : kPrefixed) {
+        size_t len = std::char_traits<char>::length(prefix.text);
+        if (inner.compare(0, len, prefix.text) == 0) {
+            return valid_prefixed_spec(inner.substr(len), prefix.allow_default, error);
         }
     }
 

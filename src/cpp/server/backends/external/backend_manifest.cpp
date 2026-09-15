@@ -48,6 +48,15 @@ bool string_array(const json& value) {
     return true;
 }
 
+// Loader/interpose variables let a manifest inject code or shadow libraries in
+// the child, so they are not accepted through the declarative env block.
+const std::set<std::string>& forbidden_env_keys() {
+    static const std::set<std::string> kKeys = {
+        "LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH",
+        "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH"};
+    return kKeys;
+}
+
 bool valid_recipe_id(const std::string& id) {
     static const std::regex kPattern("^[a-z0-9][a-z0-9_-]{1,63}$");
     return std::regex_match(id, kPattern);
@@ -93,18 +102,27 @@ bool parse_health_probe(const json& value, HealthProbe& out, std::string& error)
             return fail(error, "'health_probe.expected_status' must be an integer");
         }
         out.expected_status = value["expected_status"].get<int>();
+        if (out.expected_status < 100 || out.expected_status > 599) {
+            return fail(error, "'health_probe.expected_status' must be between 100 and 599");
+        }
     }
     if (value.contains("timeout_seconds")) {
         if (!value["timeout_seconds"].is_number_integer()) {
             return fail(error, "'health_probe.timeout_seconds' must be an integer");
         }
         out.timeout_seconds = value["timeout_seconds"].get<int>();
+        if (out.timeout_seconds < 1 || out.timeout_seconds > 600) {
+            return fail(error, "'health_probe.timeout_seconds' must be between 1 and 600");
+        }
     }
     if (value.contains("poll_interval_ms")) {
         if (!value["poll_interval_ms"].is_number_integer()) {
             return fail(error, "'health_probe.poll_interval_ms' must be an integer");
         }
         out.poll_interval_ms = value["poll_interval_ms"].get<int>();
+        if (out.poll_interval_ms < 10 || out.poll_interval_ms > 5000) {
+            return fail(error, "'health_probe.poll_interval_ms' must be between 10 and 5000");
+        }
     }
     return true;
 }
@@ -127,8 +145,12 @@ bool parse_custom_option(const json& value, CustomOption& out, std::string& erro
         return fail(error, "'custom_options' name, cli_flag, and help must be strings");
     }
     static const std::regex kFlagPattern("^--[a-z0-9-]+$");
+    static const std::regex kNamePattern("^[a-z0-9_]+$");
     out.name = value["name"].get<std::string>();
     out.cli_flag = value["cli_flag"].get<std::string>();
+    if (!std::regex_match(out.name, kNamePattern)) {
+        return fail(error, "invalid 'custom_options.name': " + out.name);
+    }
     if (!std::regex_match(out.cli_flag, kFlagPattern)) {
         return fail(error, "invalid 'custom_options.cli_flag': " + out.cli_flag);
     }
@@ -231,6 +253,9 @@ bool parse_exec_block(const json& value,
         if (!value["env"].is_object()) return fail(error, where + ".env must be an object");
         for (auto it = value["env"].begin(); it != value["env"].end(); ++it) {
             if (!it.value().is_string()) return fail(error, where + ".env values must be strings");
+            if (forbidden_env_keys().count(it.key()) > 0) {
+                return fail(error, where + ".env must not set loader variable '" + it.key() + "'");
+            }
             out.env[it.key()] = it.value().get<std::string>();
         }
     }
@@ -375,6 +400,12 @@ bool parse_backend_manifest(const json& doc, BackendManifest& out, std::string& 
             std::vector<std::string> args;
             if (!parse_string_array(it.value(), args, "capability_enable_args." + it.key(), error)) {
                 return false;
+            }
+            for (const auto& arg : args) {
+                std::string token_error;
+                if (!validate_tokens_in_string(arg, token_error)) {
+                    return fail(error, "capability_enable_args." + it.key() + ": " + token_error);
+                }
             }
             out.capability_enable_args[it.key()] = std::move(args);
         }

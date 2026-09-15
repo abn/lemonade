@@ -48,46 +48,51 @@ inline std::vector<std::string> parse_custom_args(const std::string& custom_args
 
 using CustomArgsMap = std::map<std::string, std::vector<std::vector<std::string>>>;
 
-inline CustomArgsMap build_custom_args_map(const std::vector<std::string>& tokens) {
-    CustomArgsMap result;
-    std::string last_flag;  // Track the most recently seen flag independently of map ordering
-
-    // Detect a complete negative number so it's treated as a value, not a flag.
-    auto is_negative_number = [](const std::string& token) -> bool {
-        if (token.size() < 2 || token[0] != '-') {
-            return false;
-        }
-        size_t i = 1;
-        bool has_digits = false;
+// A complete negative number is a value, not a flag. Shared so callers that
+// classify tokens (arg maps, external-manifest token resolution) agree.
+inline bool is_negative_number_token(const std::string& token) {
+    if (token.size() < 2 || token[0] != '-') {
+        return false;
+    }
+    size_t i = 1;
+    bool has_digits = false;
+    while (i < token.size() && token[i] >= '0' && token[i] <= '9') {
+        has_digits = true;
+        ++i;
+    }
+    if (i < token.size() && token[i] == '.') {
+        ++i;
         while (i < token.size() && token[i] >= '0' && token[i] <= '9') {
             has_digits = true;
             ++i;
         }
-        if (i < token.size() && token[i] == '.') {
+    }
+    if (!has_digits) {
+        return false;
+    }
+    if (i < token.size() && (token[i] == 'e' || token[i] == 'E')) {
+        ++i;
+        if (i < token.size() && (token[i] == '-' || token[i] == '+')) {
             ++i;
-            while (i < token.size() && token[i] >= '0' && token[i] <= '9') {
-                has_digits = true;
-                ++i;
-            }
         }
-        if (!has_digits) {
+        bool has_exp_digits = false;
+        while (i < token.size() && token[i] >= '0' && token[i] <= '9') {
+            has_exp_digits = true;
+            ++i;
+        }
+        if (!has_exp_digits) {
             return false;
         }
-        if (i < token.size() && (token[i] == 'e' || token[i] == 'E')) {
-            ++i;
-            if (i < token.size() && (token[i] == '-' || token[i] == '+')) {
-                ++i;
-            }
-            bool has_exp_digits = false;
-            while (i < token.size() && token[i] >= '0' && token[i] <= '9') {
-                has_exp_digits = true;
-                ++i;
-            }
-            if (!has_exp_digits) {
-                return false;
-            }
-        }
-        return i == token.size();
+    }
+    return i == token.size();
+}
+
+inline CustomArgsMap build_custom_args_map(const std::vector<std::string>& tokens) {
+    CustomArgsMap result;
+    std::string last_flag;  // Track the most recently seen flag independently of map ordering
+
+    auto is_negative_number = [](const std::string& token) -> bool {
+        return is_negative_number_token(token);
     };
 
     for (const auto& token : tokens) {
