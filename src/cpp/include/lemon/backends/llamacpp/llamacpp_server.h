@@ -27,6 +27,13 @@ public:
 
     void unload() override;
 
+    // Reuse the built-in argv construction against a variant_of fork binary.
+    bool build_launch_plan(const ModelInfo& model_info,
+                           const RecipeOptions& options,
+                           int port,
+                           LaunchPlan& out,
+                           std::string& error) const override;
+
     // ICompletionServer implementation
     json chat_completion(const json& request) override;
     json completion(const json& request) override;
@@ -53,6 +60,13 @@ public:
     json tokenize(const json& request) override;
 
 private:
+    // The llama-server argv for a load, extracted so build_launch_plan() and
+    // load() cannot drift.
+    std::vector<std::string> build_server_args(const ModelInfo& model_info,
+                                               const RecipeOptions& options,
+                                               int port,
+                                               bool use_gpu) const;
+
     // llama-server echoes the local .gguf path it was launched with (`-m <path>`)
     // in the OpenAI `model` field. Rewrite it to the client-facing model id so
     // responses don't leak absolute filesystem paths (and usernames).

@@ -503,6 +503,29 @@ public:
         return descriptor_ ? descriptor_->slot_policy : SlotPolicy::Standard;
     }
 
+    // The argv a backend would launch with, without spawning. A variant_of
+    // external recipe reuses this against a drop-in fork binary. Backends that
+    // have not been refactored yet return false with a clear reason.
+    struct LaunchPlan {
+        std::string executable;
+        std::vector<std::string> args;
+        std::string working_dir;
+        std::vector<std::pair<std::string, std::string>> env;
+    };
+
+    virtual bool build_launch_plan(const ModelInfo& model_info,
+                                   const RecipeOptions& options,
+                                   int port,
+                                   LaunchPlan& out,
+                                   std::string& error) const {
+        (void)model_info;
+        (void)options;
+        (void)port;
+        (void)out;
+        error = "backend does not expose a launch plan";
+        return false;
+    }
+
     // Dynamic availability check. Returns "" if the backend can run on this
     // system, or a user-facing reason why it cannot. Defaults to "available";
     // backends with runtime-dependent availability (cloud) override.

@@ -44,6 +44,14 @@ set(COMMON_SOURCES
     # read recipe options/flags from descriptors without linking server classes.
     # The matching factories (create()) are server-only and NOT listed here.
     ${LEMON_BACKEND_DESCRIPTOR_SOURCES}
+    # External backend manifests: discovery, validation, and CLI-side install.
+    ../server/backends/external/backend_manifest.cpp
+    ../server/backends/external/capability_registry.cpp
+    ../server/backends/external/token_vocabulary.cpp
+    ../server/backends/external/token_engine.cpp
+    ../server/backends/external/external_registry.cpp
+    ../server/backends/external/external_installer.cpp
+    external_backends.cpp
 )
 
 # Add platform-specific sources
@@ -51,16 +59,19 @@ if(WIN32)
     list(APPEND COMMON_SOURCES
         ../server/utils/platform/path_windows.cpp
         ../server/utils/platform/process_windows.cpp
+        ../server/utils/platform/archive_windows.cpp
     )
 elseif(APPLE)
     list(APPEND COMMON_SOURCES
         ../server/utils/platform/path_macos.cpp
         ../server/utils/platform/process_macos.cpp
+        ../server/utils/platform/archive_unix.cpp
     )
 elseif(UNIX)
     list(APPEND COMMON_SOURCES
         ../server/utils/platform/path_linux.cpp
         ../server/utils/platform/process_linux.cpp
+        ../server/utils/platform/archive_unix.cpp
     )
 endif()
 

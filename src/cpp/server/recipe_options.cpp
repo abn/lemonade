@@ -1,8 +1,10 @@
 #include <lemon/recipe_options.h>
 #include <lemon/backends/backend_descriptor_registry.h>
+#include <lemon/external/external_registry.h>
 #include <lemon/utils/custom_args.h>
 #include <nlohmann/json.hpp>
 #include <map>
+#include <mutex>
 #include <optional>
 #ifdef LEMONADE_CLI
 #include <CLI/CLI.hpp>
@@ -13,6 +15,25 @@
 namespace lemon {
 
 using json = nlohmann::json;
+
+namespace {
+
+// External manifests are runtime data; refresh the registry once so their
+// declarative options participate in defaults, CLI flags, and key filtering.
+void ensure_external_registry_loaded() {
+    static std::once_flag once;
+    std::call_once(once, []() {
+        lemon::external::ExternalRegistry::instance().refresh(
+            [](const std::string& recipe) { return lemon::backends::has_backend(recipe); });
+    });
+}
+
+const lemon::external::BackendManifest* external_manifest_for(const std::string& recipe) {
+    ensure_external_registry_loaded();
+    return lemon::external::ExternalRegistry::instance().manifest_for(recipe);
+}
+
+}  // namespace
 
 // Options shared by every backend. Per-backend options (and ctx_size opt-in)
 // come from each backend's descriptor; these are the universal kit.
@@ -42,6 +63,12 @@ static const json& get_defaults() {
                 d[opt.name] = opt.default_value;
             }
         }
+        ensure_external_registry_loaded();
+        for (const auto* manifest : lemon::external::ExternalRegistry::instance().all()) {
+            for (const auto& opt : manifest->custom_options) {
+                d[opt.name] = opt.default_value;
+            }
+        }
         return d;
     }();
     return defaults;
@@ -62,6 +89,14 @@ static const std::map<std::string, std::string>& get_option_to_cli_flag() {
                 }
             }
         }
+        ensure_external_registry_loaded();
+        for (const auto* manifest : lemon::external::ExternalRegistry::instance().all()) {
+            for (const auto& opt : manifest->custom_options) {
+                if (!opt.cli_flag.empty()) {
+                    m[opt.name] = opt.cli_flag;
+                }
+            }
+        }
         return m;
     }();
     return mapping;
@@ -77,6 +112,20 @@ static std::vector<std::string> get_keys_for_recipe(const std::string& recipe) {
             keys.push_back(opt.name);
         }
         keys.push_back("merge_args");
+    }
+
+    // External recipes: accept every key their manifest declares, so
+    // `{custom:NAME}`, `{custom_args}`, and device selection resolve.
+    if (const auto* manifest = external_manifest_for(recipe)) {
+        for (auto it = manifest->recipe_options.begin(); it != manifest->recipe_options.end(); ++it) {
+            keys.push_back(it.key());
+        }
+        for (const auto& opt : manifest->custom_options) {
+            keys.push_back(opt.name);
+        }
+        keys.push_back("args");
+        keys.push_back("device");
+        keys.push_back("ctx_size");
     }
 
     // Add auto-eviction options for all recipes

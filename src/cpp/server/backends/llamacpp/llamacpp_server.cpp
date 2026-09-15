@@ -279,12 +279,9 @@ void LlamaCppServer::load(const std::string& model_name,
 
     LOG(DEBUG, "LlamaCpp") << "Per-model settings: " << options.to_log_string() << std::endl;
 
-    int ctx_size = options.get_option("ctx_size");
-
     std::string llamacpp_device = options.get_option("llamacpp_device");
     std::string llamacpp_backend_option = options.get_option("llamacpp_backend");
     std::string llamacpp_backend = resolve_llamacpp_backend(llamacpp_backend_option);
-    std::string llamacpp_args = options.get_option("llamacpp_args");
 
     RuntimeConfig::validate_backend_choice("llamacpp", llamacpp_backend_option);
 
@@ -309,103 +306,11 @@ void LlamaCppServer::load(const std::string& model_name,
         LOG(DEBUG, "LlamaCpp") << "Using GGUF: " << gguf_path << std::endl;
     }
 
-    // Get mmproj path for vision models and drafter path for mtp or other drafting strategies
-    std::string mmproj_path = model_info.resolved_path("mmproj");
-    std::string draft_path = model_info.resolved_path("draft");
-
     port_ = choose_port();
 
     std::string executable = BackendUtils::get_backend_binary_path(*llamacpp::spec(), llamacpp_backend);
 
-    bool supports_embeddings = (model_info.type == ModelType::EMBEDDING);
-    bool supports_reranking = (model_info.type == ModelType::RERANKING);
-
-    // For embedding models, use a larger context size to support longer individual
-    // strings. Embedding requests can include multiple strings in a batch, and each
-    // string needs to fit within the context window.
-    if (supports_embeddings && ctx_size < EMBEDDING_CTX_SIZE) {
-        ctx_size = EMBEDDING_CTX_SIZE;
-    }
-
-    // Build command arguments while tracking reserved flags
-    std::vector<std::string> args;
-    std::set<std::string> reserved_flags;
-
-    // hf_load delegates model+mmproj resolution to llama-server's -hf flag. This
-    // is required for models like Qwen2.5-Omni where the manual -m + --mmproj
-    // path rejects audio content parts in /v1/chat/completions — the -hf path
-    // drives the dual-clip (vision+audio) context correctly.
-    if (model_info.extra<bool>("hf_load", false)) {
-        push_arg(args, reserved_flags, "-hf", model_info.checkpoint(),
-                 std::vector<std::string>{"--hf-repo", "-mr", "--hf-file", "-mf"});
-    } else {
-        push_arg(args, reserved_flags, "-m", gguf_path, std::vector<std::string>{"--model"});
-    }
-    push_arg(args, reserved_flags, "--ctx-size", std::to_string(ctx_size), std::vector<std::string>{"-c"});
-
-    if (!llamacpp_device.empty()) {
-        BackendUtils::validate_device_backend_match(llamacpp_backend, llamacpp_device);
-        push_arg(args, reserved_flags, "--device", llamacpp_device);
-    }
-    push_reserved(reserved_flags, "--device", std::vector<std::string>{"-dev"});
-
-    push_arg(args, reserved_flags, "--port", std::to_string(port_));
-    push_arg(args, reserved_flags, "--jinja", std::vector<std::string>{"--no-jinja"});
-    push_arg(args, reserved_flags, "--metrics");
-
-    LOG(DEBUG, "LlamaCpp") << "Using backend: " << llamacpp_backend << "\n"
-            << "[LlamaCpp] Use GPU: " << (use_gpu ? "true" : "false") << std::endl;
-
-    // Add mmproj file if present (for vision models). Skip when hf_load is set —
-    // llama-server resolves the mmproj companion itself from the HF repo.
-    if (!mmproj_path.empty() && !model_info.extra<bool>("hf_load", false)) {
-        push_arg(args, reserved_flags, "--mmproj", mmproj_path);
-        if (!use_gpu) {
-            LOG(DEBUG, "LlamaCpp") << "Skipping mmproj argument since GPU mode is not enabled" << std::endl;
-            push_arg(args, reserved_flags, "--no-mmproj-offload");
-        }
-    }
-    push_reserved(reserved_flags, "--mmproj", std::vector<std::string>{"-mm", "-mmu", "--mmproj-url", "--no-mmproj", "--mmproj-auto", "--no-mmproj-auto"});
-
-    const bool has_dflash_label =
-        std::find(model_info.labels.begin(), model_info.labels.end(), "dflash") != model_info.labels.end();
-    const bool is_dflash_draft =
-        !draft_path.empty() && is_dflash_draft_checkpoint(model_info.checkpoint("draft"));
-    const bool use_draft_checkpoint =
-        !draft_path.empty() && (!is_dflash_draft || has_dflash_label);
-
-    if (use_draft_checkpoint) {
-        push_arg(args, reserved_flags, "--model-draft", draft_path);
-    }
-    push_reserved(reserved_flags, "--model-draft", std::vector<std::string>{"-md", "--spec-draft-model"});
-
-    // Add embeddings support if the model supports it
-    if (supports_embeddings) {
-        LOG(INFO, "LlamaCpp") << "Model supports embeddings, adding --embeddings flag" << std::endl;
-        push_arg(args, reserved_flags, "--embeddings");
-    }
-    push_reserved(reserved_flags, "--embeddings", std::vector<std::string>{"--embedding"});
-
-    // Add reranking support if the model supports it
-    if (supports_reranking) {
-        LOG(INFO, "LlamaCpp") << "Model supports reranking, adding --reranking flag" << std::endl;
-        push_arg(args, reserved_flags, "--reranking");
-    }
-    push_reserved(reserved_flags, "--reranking", std::vector<std::string>{"--rerank"});
-
-    // Validate and append custom arguments
-    if (!llamacpp_args.empty()) {
-        std::string validation_error = validate_custom_args(llamacpp_args, reserved_flags);
-        if (!validation_error.empty()) {
-            throw std::invalid_argument(
-                "Invalid custom llama-server arguments:\n" + validation_error
-            );
-        }
-
-        LOG(DEBUG, "LlamaCpp") << "Adding custom arguments: " << llamacpp_args << std::endl;
-        std::vector<std::string> custom_args_vec = parse_custom_args(llamacpp_args);
-        args.insert(args.end(), custom_args_vec.begin(), custom_args_vec.end());
-    }
+    std::vector<std::string> args = build_server_args(model_info, options, port_, use_gpu);
 
     LOG(INFO, "LlamaCpp") << "Starting llama-server..." << std::endl;
 
@@ -586,6 +491,126 @@ void LlamaCppServer::load(const std::string& model_name,
     }
 
     LOG(DEBUG, "LlamaCpp") << "Model loaded on port " << get_backend_port() << std::endl;
+}
+
+std::vector<std::string> LlamaCppServer::build_server_args(const ModelInfo& model_info,
+                                                           const RecipeOptions& options,
+                                                           int port,
+                                                           bool use_gpu) const {
+    int ctx_size = options.get_option("ctx_size");
+    std::string llamacpp_device = options.get_option("llamacpp_device");
+    std::string llamacpp_backend = resolve_llamacpp_backend(options.get_option("llamacpp_backend"));
+    std::string llamacpp_args = options.get_option("llamacpp_args");
+
+    std::string gguf_path = model_info.resolved_path();
+    std::string mmproj_path = model_info.resolved_path("mmproj");
+    std::string draft_path = model_info.resolved_path("draft");
+
+    bool supports_embeddings = (model_info.type == ModelType::EMBEDDING);
+    bool supports_reranking = (model_info.type == ModelType::RERANKING);
+    if (supports_embeddings && ctx_size < EMBEDDING_CTX_SIZE) {
+        ctx_size = EMBEDDING_CTX_SIZE;
+    }
+
+    std::vector<std::string> args;
+    std::set<std::string> reserved_flags;
+
+    // hf_load delegates model+mmproj resolution to llama-server's -hf flag. This
+    // is required for models like Qwen2.5-Omni where the manual -m + --mmproj
+    // path rejects audio content parts in /v1/chat/completions — the -hf path
+    // drives the dual-clip (vision+audio) context correctly.
+    if (model_info.extra<bool>("hf_load", false)) {
+        push_arg(args, reserved_flags, "-hf", model_info.checkpoint(),
+                 std::vector<std::string>{"--hf-repo", "-mr", "--hf-file", "-mf"});
+    } else {
+        push_arg(args, reserved_flags, "-m", gguf_path, std::vector<std::string>{"--model"});
+    }
+    push_arg(args, reserved_flags, "--ctx-size", std::to_string(ctx_size), std::vector<std::string>{"-c"});
+
+    if (!llamacpp_device.empty()) {
+        BackendUtils::validate_device_backend_match(llamacpp_backend, llamacpp_device);
+        push_arg(args, reserved_flags, "--device", llamacpp_device);
+    }
+    push_reserved(reserved_flags, "--device", std::vector<std::string>{"-dev"});
+
+    push_arg(args, reserved_flags, "--port", std::to_string(port));
+    push_arg(args, reserved_flags, "--jinja", std::vector<std::string>{"--no-jinja"});
+    push_arg(args, reserved_flags, "--metrics");
+
+    LOG(DEBUG, "LlamaCpp") << "Using backend: " << llamacpp_backend << "\n"
+            << "[LlamaCpp] Use GPU: " << (use_gpu ? "true" : "false") << std::endl;
+
+    // Add mmproj file if present (for vision models). Skip when hf_load is set —
+    // llama-server resolves the mmproj companion itself from the HF repo.
+    if (!mmproj_path.empty() && !model_info.extra<bool>("hf_load", false)) {
+        push_arg(args, reserved_flags, "--mmproj", mmproj_path);
+        if (!use_gpu) {
+            LOG(DEBUG, "LlamaCpp") << "Skipping mmproj argument since GPU mode is not enabled" << std::endl;
+            push_arg(args, reserved_flags, "--no-mmproj-offload");
+        }
+    }
+    push_reserved(reserved_flags, "--mmproj", std::vector<std::string>{"-mm", "-mmu", "--mmproj-url", "--no-mmproj", "--mmproj-auto", "--no-mmproj-auto"});
+
+    const bool has_dflash_label =
+        std::find(model_info.labels.begin(), model_info.labels.end(), "dflash") != model_info.labels.end();
+    const bool is_dflash_draft =
+        !draft_path.empty() && is_dflash_draft_checkpoint(model_info.checkpoint("draft"));
+    const bool use_draft_checkpoint =
+        !draft_path.empty() && (!is_dflash_draft || has_dflash_label);
+
+    if (use_draft_checkpoint) {
+        push_arg(args, reserved_flags, "--model-draft", draft_path);
+    }
+    push_reserved(reserved_flags, "--model-draft", std::vector<std::string>{"-md", "--spec-draft-model"});
+
+    // Add embeddings support if the model supports it
+    if (supports_embeddings) {
+        LOG(INFO, "LlamaCpp") << "Model supports embeddings, adding --embeddings flag" << std::endl;
+        push_arg(args, reserved_flags, "--embeddings");
+    }
+    push_reserved(reserved_flags, "--embeddings", std::vector<std::string>{"--embedding"});
+
+    // Add reranking support if the model supports it
+    if (supports_reranking) {
+        LOG(INFO, "LlamaCpp") << "Model supports reranking, adding --reranking flag" << std::endl;
+        push_arg(args, reserved_flags, "--reranking");
+    }
+    push_reserved(reserved_flags, "--reranking", std::vector<std::string>{"--rerank"});
+
+    // Validate and append custom arguments
+    if (!llamacpp_args.empty()) {
+        std::string validation_error = validate_custom_args(llamacpp_args, reserved_flags);
+        if (!validation_error.empty()) {
+            throw std::invalid_argument(
+                "Invalid custom llama-server arguments:\n" + validation_error
+            );
+        }
+
+        LOG(DEBUG, "LlamaCpp") << "Adding custom arguments: " << llamacpp_args << std::endl;
+        std::vector<std::string> custom_args_vec = parse_custom_args(llamacpp_args);
+        args.insert(args.end(), custom_args_vec.begin(), custom_args_vec.end());
+    }
+
+    return args;
+}
+
+bool LlamaCppServer::build_launch_plan(const ModelInfo& model_info,
+                                       const RecipeOptions& options,
+                                       int port,
+                                       LaunchPlan& out,
+                                       std::string& error) const {
+    std::string llamacpp_backend = resolve_llamacpp_backend(options.get_option("llamacpp_backend"));
+    bool use_gpu = (llamacpp_backend != "cpu");
+    out = LaunchPlan{};
+    try {
+        out.executable = BackendUtils::get_backend_binary_path(*llamacpp::spec(), llamacpp_backend);
+        out.args = build_server_args(model_info, options, port, use_gpu);
+    } catch (const std::exception& e) {
+        error = e.what();
+        return false;
+    }
+    error.clear();
+    return true;
 }
 
 void LlamaCppServer::unload() {

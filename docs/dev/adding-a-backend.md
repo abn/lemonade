@@ -2,6 +2,8 @@
 
 Lemonade backends are **self-describing**. A backend declares *what it is* in a plain-data **descriptor** and implements *how it runs* in a **server class**, and both live together in the backend's own folder. A registry collects every descriptor, and the router, the CLI, `/system-info`, and the generated docs all read it — so there are no scattered `if (recipe == "...")` sites to update.
 
+> **Tip:** To add an engine that ships out of tree as a JSON manifest with no C++ rebuild, see [External backends](./external-backends.md).
+
 Adding a backend is **one folder plus three small appends**:
 
 | You edit | What goes there |

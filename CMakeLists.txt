@@ -1068,7 +1068,14 @@ set(LEMON_BACKEND_DESCRIPTOR_SOURCES
 set(LEMON_BACKEND_FACTORY_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/backend_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/backend_ops.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/hf_cache_util.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/hf_cache_util.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/external/backend_manifest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/external/capability_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/external/token_vocabulary.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/external/token_engine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/external/external_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/external/external_installer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/backends/external/external_backend_server.cpp)
 foreach(_backend_entry ${LEMON_BACKENDS})
     string(REPLACE "|" ";" _backend_parts "${_backend_entry}")
     list(GET _backend_parts 1 _backend_stem)

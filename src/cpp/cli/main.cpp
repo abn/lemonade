@@ -163,6 +163,8 @@ struct CliConfig {
     std::optional<bool> pinned = std::nullopt;
     std::string backend_spec;  // Format: "recipe:backend"
     bool backends_showall = false;
+    bool external_yes = false;
+    std::string external_recipe;
     bool force = false;
     std::string output_file;
     bool downloaded = false;
@@ -587,10 +589,23 @@ static int handle_run_command(lemonade::LemonadeClient& client, CliConfig& confi
     return 0;
 }
 
+namespace lemon {
+int run_external_backend_install(const std::string& recipe, bool assume_yes);
+int run_external_backend_uninstall(const std::string& recipe, bool assume_yes);
+}  // namespace lemon
+
 static int handle_backends_command(lemonade::LemonadeClient& client,
                                    const CliConfig& config,
                                    bool install_requested,
-                                   bool uninstall_requested) {
+                                   bool uninstall_requested,
+                                   bool external_install,
+                                   bool external_uninstall) {
+    if (external_install) {
+        return lemon::run_external_backend_install(config.external_recipe, config.external_yes);
+    }
+    if (external_uninstall) {
+        return lemon::run_external_backend_uninstall(config.external_recipe, config.external_yes);
+    }
     if (install_requested) {
         int result = 0;
         handle_backend_operation(config.backend_spec, "Install",
@@ -1268,6 +1283,8 @@ int main(int argc, char* argv[]) {
     backends_cmd->add_flag("--all", config.backends_showall, "Show all backends");
     CLI::App* backends_install_cmd = backends_cmd->add_subcommand("install", "Install a backend")->group("Subcommands");
     CLI::App* backends_uninstall_cmd = backends_cmd->add_subcommand("uninstall", "Uninstall a backend")->group("Subcommands");
+    CLI::App* backends_install_external_cmd = backends_cmd->add_subcommand("install-external", "Install an external backend's pinned binary")->group("Subcommands");
+    CLI::App* backends_uninstall_external_cmd = backends_cmd->add_subcommand("uninstall-external", "Uninstall an external backend")->group("Subcommands");
     CLI::App* status_cmd = app.add_subcommand("status", "Check server status")->group("Server");
     status_cmd->add_flag("--json", config.json_output, "Output status as JSON");
     CLI::App* logs_cmd = app.add_subcommand("logs", "Open server logs in the web UI")->group("Server");
@@ -1320,6 +1337,10 @@ int main(int argc, char* argv[]) {
     backends_install_cmd->add_option("spec", config.backend_spec, "Backend spec (recipe:backend)")->required()->type_name("SPEC");
     backends_install_cmd->add_flag("--force", config.force, "Bypass hardware filtering when installing a backend");
     backends_uninstall_cmd->add_option("spec", config.backend_spec, "Backend spec (recipe:backend)")->required()->type_name("SPEC");
+    backends_install_external_cmd->add_option("recipe", config.external_recipe, "External recipe id")->required()->type_name("RECIPE");
+    backends_install_external_cmd->add_flag("--yes", config.external_yes, "Skip the consent prompt");
+    backends_uninstall_external_cmd->add_option("recipe", config.external_recipe, "External recipe id")->required()->type_name("RECIPE");
+    backends_uninstall_external_cmd->add_flag("--yes", config.external_yes, "Skip the consent prompt");
 
     // Cloud provider commands. `cloud` is a subcommand group with install /
     // uninstall / auth / list. Mirrors the `backends` group shape on purpose
@@ -1613,7 +1634,9 @@ int main(int argc, char* argv[]) {
     } else if (backends_cmd->count() > 0) {
         return handle_backends_command(client, config,
                                        backends_install_cmd->count() > 0,
-                                       backends_uninstall_cmd->count() > 0);
+                                       backends_uninstall_cmd->count() > 0,
+                                       backends_install_external_cmd->count() > 0,
+                                       backends_uninstall_external_cmd->count() > 0);
     } else if (alias_cmd->count() > 0) {
         if (alias_add_cmd->count() > 0) {
             return client.alias_add(config.alias_name, config.alias_target);

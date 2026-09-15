@@ -10,6 +10,8 @@
 #include "lemon/backends/backend_utils.h"
 #include "lemon/backends/backend_descriptor_registry.h"
 #include "lemon/backends/backend_registry.h"
+#include "lemon/external/capability_registry.h"
+#include "lemon/external/external_registry.h"
 #include "lemon/recipe_backend_def.h"
 #include <filesystem>
 #include <fstream>
@@ -1092,6 +1094,18 @@ std::string SystemInfo::get_os_version() {
     #endif
 }
 
+namespace {
+
+void ensure_external_manifests_loaded() {
+    static std::once_flag once;
+    std::call_once(once, []() {
+        lemon::external::ExternalRegistry::instance().refresh(
+            [](const std::string& candidate) { return lemon::backends::has_backend(candidate); });
+    });
+}
+
+}  // namespace
+
 json SystemInfo::build_recipes_info(const json& devices) {
     json recipes;
 
@@ -1660,11 +1674,70 @@ json SystemInfo::build_recipes_info(const json& devices) {
         entry["options"] = options;
     }
 
+    // Surface runtime-discovered external backend manifests so clients can list
+    // and select them. Discovery is refreshed once; the watcher owns later reloads.
+    {
+        ensure_external_manifests_loaded();
+
+        auto modality_for = [](const lemon::external::BackendManifest& manifest) -> std::string {
+            for (const auto& capability : manifest.capabilities) {
+                const auto* info = lemon::external::capability_info(capability);
+                if (info == nullptr || !info->has_mode) continue;
+                const std::string mode(info->mode_label);
+                if (mode == "chat") return "Text generation";
+                if (mode == "embeddings") return "Embeddings";
+                if (mode == "reranking") return "Reranking";
+                if (mode == "transcription") return "Speech-to-text";
+                if (mode == "tts") return "Text-to-speech";
+                if (mode == "image") return "Image generation";
+                if (mode == "audio-generation") return "Audio generation";
+                if (mode == "classification") return "Text classification";
+                if (mode == "3d") return "3D generation";
+            }
+            return "";
+        };
+
+        for (const auto* manifest : lemon::external::ExternalRegistry::instance().all()) {
+            json& entry = recipes[manifest->recipe];
+            entry["display_name"] = manifest->display_name;
+            entry["modality"] = modality_for(*manifest);
+            entry["is_external"] = true;
+            entry["order"] = recipe_order++;
+            entry["slot_policy"] = manifest->slot_policy;
+            entry["backends"][manifest->recipe] = {
+                {"devices", json::array()},
+                {"state", "installed"},
+                {"message", ""},
+                {"action", ""},
+                {"can_uninstall", true},
+            };
+            json options = json::array();
+            for (const auto& opt : manifest->custom_options) {
+                options.push_back({
+                    {"name", opt.name},
+                    {"cli_flag", opt.cli_flag},
+                    {"default", opt.default_value},
+                    {"type_name", opt.type_name},
+                    {"help", opt.help},
+                    {"group", opt.group},
+                });
+            }
+            entry["options"] = options;
+        }
+    }
+
     return recipes;
 }
 
 SystemInfo::SupportedBackendsResult SystemInfo::get_supported_backends(const std::string& recipe) {
     SupportedBackendsResult result;
+
+    ensure_external_manifests_loaded();
+    if (const auto* manifest = lemon::external::ExternalRegistry::instance().manifest_for(recipe)) {
+        result.backends.push_back(manifest->recipe);
+        return result;
+    }
+
     json system_info = SystemInfoCache::get_system_info_with_cache();
 
     if (!system_info.contains("recipes") || !system_info["recipes"].contains(recipe)) {
@@ -1721,6 +1794,12 @@ SystemInfo::SupportedBackendsResult SystemInfo::get_supported_backends(const std
 }
 
 std::string SystemInfo::check_recipe_supported(const std::string& recipe) {
+    // External manifests are runtime-defined and available wherever their
+    // platform block matches; the launch path fails loudly if it cannot run.
+    ensure_external_manifests_loaded();
+    if (lemon::external::ExternalRegistry::instance().manifest_for(recipe) != nullptr) {
+        return "";
+    }
     // A backend whose descriptor declares no support rows has no local
     // hardware/OS gating (e.g. cloud offload): availability is determined at
     // runtime (provider creds via the CloudProviderRegistry / API key).

@@ -75,6 +75,7 @@ nav:
       - vLLM: guide/configuration/vllm.md
       - Moonshine: guide/configuration/moonshine.md
       - Cloud Offload: guide/configuration/cloud.md
+      - External Backends: guide/configuration/external-backends.md
     - Telemetry: guide/telemetry.md
     - FAQ: guide/faq.md
   - Development:
@@ -88,6 +89,7 @@ nav:
     - Testing: dev/testing.md
     - C++: dev/getting-started.md
     - Adding a Backend: dev/adding-a-backend.md
+    - External Backends: dev/external-backends.md
     - Backends Reference: dev/backends-reference.md
     - Desktop App: dev/app.md
     - Web UI: dev/web-ui.md
