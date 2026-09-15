@@ -603,7 +603,10 @@ bool LlamaCppServer::build_launch_plan(const ModelInfo& model_info,
     bool use_gpu = (llamacpp_backend != "cpu");
     out = LaunchPlan{};
     try {
-        out.executable = BackendUtils::get_backend_binary_path(*llamacpp::spec(), llamacpp_backend);
+        // Only the binary name is needed; the external loader uses the
+        // manifest's declared binary. Avoid resolving (and installing) the
+        // built-in executable, which would throw on a host without it.
+        out.executable = llamacpp::spec()->binary;
         out.args = build_server_args(model_info, options, port, use_gpu);
     } catch (const std::exception& e) {
         error = e.what();

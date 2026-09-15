@@ -9,24 +9,22 @@
 #include <stdexcept>
 #include <thread>
 
-#include "lemon/external/external_registry.h"
 #include "lemon/external/capability_registry.h"
+#include "lemon/external/external_installer.h"
+#include "lemon/external/external_registry.h"
 #include "lemon/backends/backend_registry.h"
 #include "lemon/system_info.h"
 #include "lemon/utils/aixlog.hpp"
 #include "lemon/utils/custom_args.h"
 #include "lemon/utils/http_client.h"
+#include "lemon/utils/network_utils.h"
 #include "lemon/utils/path_utils.h"
 #include "lemon/utils/process_manager.h"
 
 #ifndef _WIN32
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <netinet/in.h>
 #include <sys/socket.h>
-#include <unistd.h>
 #else
-#include <ws2tcpip.h>
+#include <winsock2.h>
 #endif
 
 namespace lemon {
@@ -52,58 +50,17 @@ std::string to_posix_path(const std::string& path) {
     return result;
 }
 
-bool tcp_reachable(const std::string& host, int port, int timeout_ms) {
-#ifdef _WIN32
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == INVALID_SOCKET) {
-        WSACleanup();
+// A one-shot status probe so the manifest's expected_status is honored
+// (HttpClient::is_reachable hardcodes 200). A refused connection during
+// startup is a "not ready yet", not an error.
+bool http_status_matches(const std::string& url, int expected) {
+    try {
+        utils::HttpResponse response =
+            utils::HttpClient::get(url, {}, 1, utils::HttpSecurityPolicy::TrustedLoopback);
+        return response.status_code == expected;
+    } catch (...) {
         return false;
     }
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_port = htons(static_cast<u_short>(port));
-    inet_pton(AF_INET, host.c_str(), &address.sin_addr);
-    u_long nonblocking = 1;
-    ioctlsocket(sock, FIONBIO, &nonblocking);
-    connect(sock, reinterpret_cast<sockaddr*>(&address), sizeof(address));
-    fd_set writable;
-    FD_ZERO(&writable);
-    FD_SET(sock, &writable);
-    timeval tv{timeout_ms / 1000, (timeout_ms % 1000) * 1000};
-    bool ok = select(0, nullptr, &writable, nullptr, &tv) > 0;
-    closesocket(sock);
-    WSACleanup();
-    return ok;
-#else
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return false;
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_port = htons(static_cast<uint16_t>(port));
-    inet_pton(AF_INET, host.c_str(), &address.sin_addr);
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-    int rc = connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address));
-    bool ok = false;
-    if (rc == 0) {
-        ok = true;
-    } else if (errno == EINPROGRESS) {
-        fd_set writable;
-        FD_ZERO(&writable);
-        FD_SET(fd, &writable);
-        timeval tv{timeout_ms / 1000, (timeout_ms % 1000) * 1000};
-        if (select(fd + 1, nullptr, &writable, nullptr, &tv) > 0) {
-            int so_error = 0;
-            socklen_t len = sizeof(so_error);
-            getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_error, &len);
-            ok = (so_error == 0);
-        }
-    }
-    close(fd);
-    return ok;
-#endif
 }
 
 std::string option_string(const RecipeOptions& options, const std::string& key,
@@ -347,10 +304,16 @@ void ExternalBackendServer::load(const std::string& model_name,
         }
     }
 
-    std::string spawn_command = block.command;
-    std::string working_dir = block.working_dir;
+    std::string spawn_command;
+    std::string working_dir;
     std::vector<std::string> final_args;
     std::string resolve_error;
+    if (!resolve_template(block.command, sources, spawn_command, resolve_error)) {
+        throw std::invalid_argument("recipe '" + manifest_->recipe + "': command: " + resolve_error);
+    }
+    if (!resolve_template(block.working_dir, sources, working_dir, resolve_error)) {
+        throw std::invalid_argument("recipe '" + manifest_->recipe + "': working_dir: " + resolve_error);
+    }
     std::map<std::string, std::string> env_map;
     if (!resolve_env_block(block.env, sources, env_map, resolve_error)) {
         throw std::invalid_argument("recipe '" + manifest_->recipe + "': " + resolve_error);
@@ -378,14 +341,17 @@ void ExternalBackendServer::load(const std::string& model_name,
         const std::string binary_name = block.binary.empty()
                                             ? fs::path(plan.executable).filename().string()
                                             : block.binary;
-        const fs::path external_path =
-            fs::path(utils::get_cache_dir()) / "external" / manifest_->recipe / binary_name;
-        if (!fs::exists(external_path)) {
+        const std::string external_path = resolve_installed_binary(manifest_->recipe, binary_name);
+        if (external_path.empty()) {
             throw std::invalid_argument(
                 "recipe '" + manifest_->recipe + "': binary is not installed. Run `lemonade backends " +
                 "install-external " + manifest_->recipe + "` first.");
         }
-        spawn_command = external_path.string();
+        spawn_command = external_path;
+#ifndef _WIN32
+        // A fork ships its own shared libraries beside the binary.
+        env_vec.emplace_back("LD_LIBRARY_PATH", fs::path(external_path).parent_path().string());
+#endif
         final_args = plan.args;
         working_dir = plan.working_dir;
         for (const auto& [key, value] : plan.env) env_vec.emplace_back(key, value);
@@ -485,8 +451,8 @@ bool ExternalBackendServer::perform_health_probe(const HealthProbe& probe) {
             return true;
         }
         if (probe.type == "tcp") {
-            if (tcp_reachable("127.0.0.1", port_, 250)) return true;
-        } else if (utils::HttpClient::is_reachable(url, 1, utils::HttpSecurityPolicy::TrustedLoopback)) {
+            if (utils::is_tcp_listener_active(AF_INET, "127.0.0.1", port_)) return true;
+        } else if (http_status_matches(url, probe.expected_status)) {
             return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(probe.poll_interval_ms));

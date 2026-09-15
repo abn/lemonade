@@ -2661,6 +2661,9 @@ void Router::chat_completion_stream(const std::string& request_body, httplib::Da
                 if (request_json.contains("max_completion_tokens")) span->set_attribute("llm.config.max_completion_tokens", request_json["max_completion_tokens"]);
             }
 
+            if (!server->has_capability("chat_completion")) {
+                throw UnsupportedOperationException("Chat completion", device_type_to_string(server->get_device_type()));
+            }
             server->forward_streaming_request("/v1/chat/completions", request_body, telemetry_sink, true, 0,
                 [this, identity, span, accumulated_text, accumulated_reasoning, accumulated_tool_calls, server](
                     const StreamingProxy::TelemetryData& telemetry) {
@@ -2785,6 +2788,9 @@ void Router::completion_stream(const std::string& request_body, httplib::DataSin
                 if (request_json.contains("max_tokens")) span->set_attribute("llm.config.max_tokens", request_json["max_tokens"]);
             }
 
+            if (!server->has_capability("completion")) {
+                throw UnsupportedOperationException("Completion", device_type_to_string(server->get_device_type()));
+            }
             server->forward_streaming_request("/v1/completions", request_body, telemetry_sink, true, 0,
                 [this, identity, span, accumulated_text, server](
                     const StreamingProxy::TelemetryData& telemetry) {
@@ -2895,6 +2901,9 @@ void Router::responses_stream(const std::string& request_body, httplib::DataSink
                 if (request_json.contains("max_tokens")) span->set_attribute("llm.config.max_tokens", request_json["max_tokens"]);
             }
 
+            if (!server->has_capability("responses")) {
+                throw UnsupportedOperationException("Responses", device_type_to_string(server->get_device_type()));
+            }
             server->forward_streaming_request("/v1/responses", request_body, telemetry_sink, true, 0,
                 [this, identity, span, accumulated_text, server](
                     const StreamingProxy::TelemetryData& telemetry) {

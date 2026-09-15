@@ -361,10 +361,9 @@ bool WhisperServer::build_launch_plan(const ModelInfo& model_info,
                                       int port,
                                       LaunchPlan& out,
                                       std::string& error) const {
-    std::string backend = options.get_option("whispercpp_backend");
     out = LaunchPlan{};
     try {
-        out.executable = BackendUtils::get_backend_binary_path(*whispercpp::spec(), backend);
+        out.executable = whispercpp::spec()->binary;
         out.args = build_server_args(model_info, options, port);
     } catch (const std::exception& e) {
         error = e.what();

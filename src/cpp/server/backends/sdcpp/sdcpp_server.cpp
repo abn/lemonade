@@ -212,8 +212,6 @@ void SDServer::load(const std::string& model_name,
     backend_manager_->install_backend(sdcpp::spec()->recipe, backend);
 
     std::string model_path = model_info.resolved_path("main");
-    std::string llm_path = model_info.resolved_path("text_encoder");
-    std::string vae_path = model_info.resolved_path("vae");
 
     if (model_path.empty()) {
         throw std::runtime_error("Model file not found for checkpoint: " + model_info.checkpoint());
@@ -433,7 +431,7 @@ bool SDServer::build_launch_plan(const ModelInfo& model_info,
     std::string resolved_backend = resolve_sdcpp_backend(backend);
     out = LaunchPlan{};
     try {
-        out.executable = BackendUtils::get_backend_binary_path(*sdcpp::spec(), backend);
+        out.executable = sdcpp::spec()->binary;
         out.args = build_server_args(model_info, options, port, resolved_backend);
     } catch (const std::exception& e) {
         error = e.what();

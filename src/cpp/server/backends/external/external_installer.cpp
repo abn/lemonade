@@ -68,6 +68,14 @@ std::string external_install_dir(const std::string& recipe) {
     return (fs::path(utils::get_cache_dir()) / "external" / recipe).string();
 }
 
+std::string resolve_installed_binary(const std::string& recipe, const std::string& binary) {
+    if (binary.empty()) return "";
+    const fs::path install_dir(external_install_dir(recipe));
+    const fs::path exact = install_dir / binary;
+    if (fs::exists(exact)) return exact.string();
+    return find_binary(install_dir, {binary});
+}
+
 InstallOutcome install_external_binary(const BackendManifest& manifest) {
     InstallOutcome outcome;
     const fs::path install_dir(external_install_dir(manifest.recipe));
@@ -130,7 +138,10 @@ InstallOutcome install_external_binary(const BackendManifest& manifest) {
         }
     }
 
-    outcome.binary_path = find_binary(install_dir, candidate_binary_names(manifest));
+    outcome.binary_path = resolve_installed_binary(manifest.recipe,
+                                                    candidate_binary_names(manifest).empty()
+                                                        ? ""
+                                                        : *candidate_binary_names(manifest).begin());
     if (outcome.binary_path.empty()) {
         outcome.message = "no binary found in installed artifact";
         return outcome;

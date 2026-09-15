@@ -62,10 +62,10 @@ void print_provenance(const BackendManifest& manifest) {
                  "           sandbox is enforced by this RFC; run only manifests you trust.\n";
 }
 
-bool confirm(bool assume_yes) {
+bool confirm(bool assume_yes, const std::string& action) {
     if (assume_yes) return true;
     if (!isatty(fileno(stdin))) {
-        std::cerr << "Refusing to install without --yes on a non-interactive terminal.\n";
+        std::cerr << "Refusing to " << action << " without --yes on a non-interactive terminal.\n";
         return false;
     }
     std::cout << "Proceed? [y/N] " << std::flush;
@@ -83,7 +83,7 @@ int run_external_backend_install(const std::string& recipe, bool assume_yes) {
         return 1;
     }
     print_provenance(*manifest);
-    if (!confirm(assume_yes)) {
+    if (!confirm(assume_yes, "install")) {
         std::cerr << "Aborted.\n";
         return 1;
     }
@@ -107,14 +107,22 @@ int run_external_backend_uninstall(const std::string& recipe, bool assume_yes) {
         return 1;
     }
     print_provenance(*manifest);
-    if (!confirm(assume_yes)) {
+    if (!confirm(assume_yes, "remove")) {
         std::cerr << "Aborted.\n";
         return 1;
     }
 
     std::error_code ec;
     fs::remove(manifest->source_path, ec);
+    if (ec) {
+        std::cerr << "Failed to remove " << manifest->source_path << ": " << ec.message() << "\n";
+        return 1;
+    }
     fs::remove_all(external_install_dir(recipe), ec);
+    if (ec) {
+        std::cerr << "Removed descriptor but failed to remove installed files: " << ec.message() << "\n";
+        return 1;
+    }
     std::cout << "Removed external backend '" << recipe << "'.\n";
     return 0;
 }
