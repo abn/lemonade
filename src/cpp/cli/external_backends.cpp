@@ -35,7 +35,7 @@ bool under_any(const std::string& path, const std::vector<std::string>& roots) {
     return false;
 }
 
-const BackendManifest* find_external(const std::string& recipe) {
+ExternalRegistry::ManifestPtr find_external(const std::string& recipe) {
     DiscoveryPaths paths = default_discovery_paths();
     ExternalRegistry::instance().refresh(
         paths, [](const std::string& candidate) { return backends::has_backend(candidate); });
@@ -77,7 +77,7 @@ bool confirm(bool assume_yes) {
 }  // namespace
 
 int run_external_backend_install(const std::string& recipe, bool assume_yes) {
-    const BackendManifest* manifest = find_external(recipe);
+    auto manifest = find_external(recipe);
     if (manifest == nullptr) {
         std::cerr << "No external backend manifest found for recipe '" << recipe << "'.\n";
         return 1;
@@ -93,7 +93,7 @@ int run_external_backend_install(const std::string& recipe, bool assume_yes) {
 }
 
 int run_external_backend_uninstall(const std::string& recipe, bool assume_yes) {
-    const BackendManifest* manifest = find_external(recipe);
+    auto manifest = find_external(recipe);
     if (manifest == nullptr) {
         std::cerr << "No external backend manifest found for recipe '" << recipe << "'.\n";
         return 1;

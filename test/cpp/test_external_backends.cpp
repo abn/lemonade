@@ -236,7 +236,7 @@ void test_extends_merge() {
     DiscoveryPaths paths;
     paths.user_config.push_back(dir);
     ExternalRegistry::instance().refresh(paths);
-    const BackendManifest* merged = ExternalRegistry::instance().manifest_for("child_ext");
+    auto merged = ExternalRegistry::instance().manifest_for("child_ext");
     check("extends child discovered", merged != nullptr);
     if (merged != nullptr) {
         check("extends inherits base option", merged->recipe_options.value("ctx_size", 0) == 2048);
@@ -353,7 +353,7 @@ void test_discovery_priority_and_reserved() {
     auto is_reserved = [](const std::string& recipe) { return recipe == "builtin_recipe"; };
     ExternalRegistry::instance().refresh(paths, is_reserved);
 
-    const BackendManifest* dup = ExternalRegistry::instance().manifest_for("dup_recipe");
+    auto dup = ExternalRegistry::instance().manifest_for("dup_recipe");
     check("higher-priority path wins duplicate", dup != nullptr && dup->display_name == "From Config");
     check("reserved recipe rejected",
           ExternalRegistry::instance().manifest_for("builtin_recipe") == nullptr);

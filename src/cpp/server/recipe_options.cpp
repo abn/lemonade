@@ -21,14 +21,11 @@ namespace {
 // External manifests are runtime data; refresh the registry once so their
 // declarative options participate in defaults, CLI flags, and key filtering.
 void ensure_external_registry_loaded() {
-    static std::once_flag once;
-    std::call_once(once, []() {
-        lemon::external::ExternalRegistry::instance().refresh(
-            [](const std::string& recipe) { return lemon::backends::has_backend(recipe); });
-    });
+    lemon::external::ExternalRegistry::instance().ensure_loaded(
+        [](const std::string& recipe) { return lemon::backends::has_backend(recipe); });
 }
 
-const lemon::external::BackendManifest* external_manifest_for(const std::string& recipe) {
+lemon::external::ExternalRegistry::ManifestPtr external_manifest_for(const std::string& recipe) {
     ensure_external_registry_loaded();
     return lemon::external::ExternalRegistry::instance().manifest_for(recipe);
 }
@@ -64,7 +61,7 @@ static const json& get_defaults() {
             }
         }
         ensure_external_registry_loaded();
-        for (const auto* manifest : lemon::external::ExternalRegistry::instance().all()) {
+        for (const auto& manifest : lemon::external::ExternalRegistry::instance().all()) {
             for (const auto& opt : manifest->custom_options) {
                 d[opt.name] = opt.default_value;
             }
@@ -90,7 +87,7 @@ static const std::map<std::string, std::string>& get_option_to_cli_flag() {
             }
         }
         ensure_external_registry_loaded();
-        for (const auto* manifest : lemon::external::ExternalRegistry::instance().all()) {
+        for (const auto& manifest : lemon::external::ExternalRegistry::instance().all()) {
             for (const auto& opt : manifest->custom_options) {
                 if (!opt.cli_flag.empty()) {
                     m[opt.name] = opt.cli_flag;
@@ -116,7 +113,7 @@ static std::vector<std::string> get_keys_for_recipe(const std::string& recipe) {
 
     // External recipes: accept every key their manifest declares, so
     // `{custom:NAME}`, `{custom_args}`, and device selection resolve.
-    if (const auto* manifest = external_manifest_for(recipe)) {
+    if (auto manifest = external_manifest_for(recipe)) {
         for (auto it = manifest->recipe_options.begin(); it != manifest->recipe_options.end(); ++it) {
             keys.push_back(it.key());
         }

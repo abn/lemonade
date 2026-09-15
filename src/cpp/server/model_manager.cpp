@@ -4292,12 +4292,9 @@ bool ModelManager::is_model_downloaded(const std::string& model_name) {
 bool ModelManager::backend_self_manages_downloads(const std::string& recipe) const {
     const auto* desc = backends::descriptor_for(recipe);
     if (desc && desc->self_manages_downloads) return true;
-    static std::once_flag external_once;
-    std::call_once(external_once, []() {
-        lemon::external::ExternalRegistry::instance().refresh(
-            [](const std::string& candidate) { return lemon::backends::has_backend(candidate); });
-    });
-    const auto* manifest = lemon::external::ExternalRegistry::instance().manifest_for(recipe);
+    lemon::external::ExternalRegistry::instance().ensure_loaded(
+        [](const std::string& candidate) { return lemon::backends::has_backend(candidate); });
+    auto manifest = lemon::external::ExternalRegistry::instance().manifest_for(recipe);
     return manifest != nullptr && manifest->model_management == "self_managed";
 }
 

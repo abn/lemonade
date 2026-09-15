@@ -3,8 +3,6 @@
 #include "lemon/external/external_registry.h"
 #include "lemon/wrapped_server.h"
 
-#include <mutex>
-
 // Generated from LEMON_BACKENDS at configure time. Defines
 // lemon::backends::generated_registrations(), pairing each descriptor with its
 // server class's create().
@@ -49,14 +47,11 @@ std::unique_ptr<WrappedServer> create_server(const std::string& recipe, const Ba
 
     // External manifests are loaded at runtime; discover them once, treating
     // built-in recipes as reserved so an external descriptor cannot shadow one.
-    static std::once_flag external_refresh_once;
-    std::call_once(external_refresh_once, []() {
-        lemon::external::ExternalRegistry::instance().refresh(
-            [](const std::string& candidate) { return has_backend(candidate); });
-        lemon::external::ExternalRegistry::instance().start_watcher();
-    });
+    lemon::external::ExternalRegistry::instance().ensure_loaded(
+        [](const std::string& candidate) { return has_backend(candidate); });
+    lemon::external::ExternalRegistry::instance().start_watcher();
 
-    const auto* manifest = lemon::external::ExternalRegistry::instance().manifest_for(recipe);
+    auto manifest = lemon::external::ExternalRegistry::instance().manifest_for(recipe);
     if (manifest != nullptr) {
         auto server = std::make_unique<ExternalBackendServer>(
             recipe, ctx.log_level, ctx.model_manager, ctx.backend_manager);

@@ -1097,11 +1097,8 @@ std::string SystemInfo::get_os_version() {
 namespace {
 
 void ensure_external_manifests_loaded() {
-    static std::once_flag once;
-    std::call_once(once, []() {
-        lemon::external::ExternalRegistry::instance().refresh(
-            [](const std::string& candidate) { return lemon::backends::has_backend(candidate); });
-    });
+    lemon::external::ExternalRegistry::instance().ensure_loaded(
+        [](const std::string& candidate) { return lemon::backends::has_backend(candidate); });
 }
 
 }  // namespace
@@ -1697,7 +1694,7 @@ json SystemInfo::build_recipes_info(const json& devices) {
             return "";
         };
 
-        for (const auto* manifest : lemon::external::ExternalRegistry::instance().all()) {
+        for (const auto& manifest : lemon::external::ExternalRegistry::instance().all()) {
             json& entry = recipes[manifest->recipe];
             entry["display_name"] = manifest->display_name;
             entry["modality"] = modality_for(*manifest);
@@ -1733,7 +1730,7 @@ SystemInfo::SupportedBackendsResult SystemInfo::get_supported_backends(const std
     SupportedBackendsResult result;
 
     ensure_external_manifests_loaded();
-    if (const auto* manifest = lemon::external::ExternalRegistry::instance().manifest_for(recipe)) {
+    if (auto manifest = lemon::external::ExternalRegistry::instance().manifest_for(recipe)) {
         result.backends.push_back(manifest->recipe);
         return result;
     }

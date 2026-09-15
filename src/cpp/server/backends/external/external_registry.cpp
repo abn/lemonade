@@ -160,8 +160,7 @@ bool descriptor_path_is_trusted(const std::string& path,
                 reason = "ancestor directory '" + parent.string() + "' is a symlink";
                 return false;
             }
-            if (parent_st.st_uid != geteuid() && (parent_st.st_mode & 0022) != 0 &&
-                (parent_st.st_mode & S_ISVTX) == 0) {
+            if ((parent_st.st_mode & 0022) != 0 && (parent_st.st_mode & S_ISVTX) == 0) {
                 reason = "ancestor directory '" + parent.string() +
                          "' is group/world writable without the sticky bit";
                 return false;
@@ -345,23 +344,30 @@ void ExternalRegistry::refresh(const DiscoveryPaths& paths,
     last_predicate_ = is_reserved;
 }
 
-const BackendManifest* ExternalRegistry::manifest_for(const std::string& recipe) const {
+ExternalRegistry::~ExternalRegistry() { stop_watcher(); }
+
+void ExternalRegistry::ensure_loaded(const ReservedPredicate& is_reserved) {
+    static std::once_flag once;
+    std::call_once(once, [is_reserved]() {
+        ExternalRegistry::instance().refresh(default_discovery_paths(), is_reserved);
+    });
+}
+
+ExternalRegistry::ManifestPtr ExternalRegistry::manifest_for(const std::string& recipe) const {
     std::lock_guard<std::mutex> lock(mutex_);
     for (const auto& manifest : manifests_) {
-        if (manifest->recipe == recipe) return manifest.get();
+        if (manifest->recipe == recipe) return manifest;
     }
     return nullptr;
 }
 
-std::vector<const BackendManifest*> ExternalRegistry::all() const {
+std::vector<ExternalRegistry::ManifestPtr> ExternalRegistry::all() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    std::vector<const BackendManifest*> result;
-    result.reserve(manifests_.size());
-    for (const auto& manifest : manifests_) result.push_back(manifest.get());
-    return result;
+    return std::vector<ManifestPtr>(manifests_.begin(), manifests_.end());
 }
 
-const std::vector<RejectedDescriptor>& ExternalRegistry::rejected() const {
+std::vector<RejectedDescriptor> ExternalRegistry::rejected() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     return rejected_;
 }
 
@@ -406,7 +412,7 @@ uint64_t search_paths_signature(const DiscoveryPaths& paths) {
 
 void ExternalRegistry::start_watcher() {
     if (watcher_running_.exchange(true)) return;
-    std::thread([this]() {
+    watcher_thread_ = std::thread([this]() {
         DiscoveryPaths paths;
         ReservedPredicate predicate;
         {
@@ -424,10 +430,14 @@ void ExternalRegistry::start_watcher() {
                 refresh(paths, predicate);
             }
         }
-    }).detach();
+    });
 }
 
-void ExternalRegistry::stop_watcher() { watcher_running_.store(false); }
+void ExternalRegistry::stop_watcher() {
+    if (watcher_running_.exchange(false)) {
+        if (watcher_thread_.joinable()) watcher_thread_.join();
+    }
+}
 
 }  // namespace external
 }  // namespace lemon

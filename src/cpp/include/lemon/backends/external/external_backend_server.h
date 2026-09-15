@@ -34,7 +34,9 @@ public:
                           BackendManager* backend_manager);
     ~ExternalBackendServer() override;
 
-    void set_manifest(const external::BackendManifest* manifest) { manifest_ = manifest; }
+    void set_manifest(std::shared_ptr<const external::BackendManifest> manifest) {
+        manifest_ = std::move(manifest);
+    }
 
     void load(const std::string& model_name,
               const ModelInfo& model_info,
@@ -74,7 +76,7 @@ private:
     bool perform_health_probe(const external::HealthProbe& probe);
     bool select_platform_block(const RecipeOptions& options, external::ExecBlock& out, std::string& error);
 
-    const external::BackendManifest* manifest_ = nullptr;
+    std::shared_ptr<const external::BackendManifest> manifest_;
     std::string selected_platform_;
     external::ExecBlock active_block_;
     external::TokenSources load_sources_;
